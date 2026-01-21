@@ -2,6 +2,13 @@
 name = "clustered-fast-trie"
 version = "0.1.0"
 edition = "2021"
+authors = ["Andrei Dubrovskii <arktusprime@gmail.com>"]
+license = "MIT OR Apache-2.0"
+description = "Ordered integer set (u32/u64/u128) for data with locality. O(1) range counting. Stable O(log log U) latency."
+repository = "https://github.com/arktusprime/clustered-fast-trie"
+readme = "README.md"
+keywords = ["ordered-set", "integer-set", "trie", "no-std", "range-query"]
+categories = ["data-structures", "no-std", "algorithms"]
 
 [dependencies]
 
