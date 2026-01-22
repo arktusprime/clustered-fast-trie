@@ -13,6 +13,8 @@
 
 extern crate alloc;
 
+mod constants;
+
 mod key;
 
 pub use key::TrieKey;
