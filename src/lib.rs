@@ -13,8 +13,8 @@
 
 extern crate alloc;
 
-mod constants;
 mod bitmap;
+mod constants;
 
 mod key;
 
