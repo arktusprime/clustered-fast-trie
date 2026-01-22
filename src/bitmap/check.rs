@@ -108,10 +108,10 @@ pub fn are_bits_set(bitmap: &[u64; 4], indices: &[u8]) -> bool {
 /// `true` if no bits are set, `false` otherwise
 ///
 /// # Performance
-/// O(1) - checks all 4 words with bitwise OR
+/// O(1) - uses OR reduction (SIMD-friendly, fewer branches)
 #[inline]
 pub fn is_empty(bitmap: &[u64; 4]) -> bool {
-    bitmap[0] == 0 && bitmap[1] == 0 && bitmap[2] == 0 && bitmap[3] == 0
+    (bitmap[0] | bitmap[1] | bitmap[2] | bitmap[3]) == 0
 }
 
 /// Check if bitmap is full (all bits set).
@@ -123,10 +123,10 @@ pub fn is_empty(bitmap: &[u64; 4]) -> bool {
 /// `true` if all bits are set, `false` otherwise
 ///
 /// # Performance
-/// O(1) - checks all 4 words with bitwise AND
+/// O(1) - uses AND reduction (SIMD-friendly, fewer branches)
 #[inline]
 pub fn is_full(bitmap: &[u64; 4]) -> bool {
-    bitmap[0] == !0u64 && bitmap[1] == !0u64 && bitmap[2] == !0u64 && bitmap[3] == !0u64
+    (bitmap[0] & bitmap[1] & bitmap[2] & bitmap[3]) == !0u64
 }
 
 #[cfg(test)]
