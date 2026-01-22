@@ -1,6 +1,6 @@
 # clustered-fast-trie
 
-Ordered integer set (u32/u64/u128) optimized for clustered data.
+In-memory ordered set for integer keys (u32/u64/u128) optimized for clustered data.
 
 ## Key Features
 
@@ -10,6 +10,15 @@ Ordered integer set (u32/u64/u128) optimized for clustered data.
 - **Bulk operations** — 10-100x faster than individual inserts
 - **Multi-tenancy** — unlimited isolation via segmented arena
 - **Zero dependencies** — no_std compatible (requires alloc)
+
+## Positioning
+
+Specialized **in-memory ordered set** for integer keys with:
+- High-throughput tracking (Kafka offsets, event IDs)
+- Time-series indexing (timestamp presence checks)
+- Multi-tenant isolation (per-user/per-metric sets)
+- Real-time analytics (fast range counting)
+- Event sourcing (sequence number tracking)
 
 ## Quick Start
 
