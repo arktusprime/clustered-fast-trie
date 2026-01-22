@@ -2,18 +2,18 @@
 
 use crate::bitmap::{leading_zeros, popcount, trailing_zeros};
 
-/// Find first set bit (minimum).
+/// Find minimum set bit.
 ///
 /// # Arguments
 /// * `bitmap` - Reference to 4-word bitmap
 ///
 /// # Returns
-/// Index of first set bit, or None if bitmap is empty
+/// Index of minimum set bit, or None if bitmap is empty
 ///
 /// # Performance
 /// O(1) - uses CPU intrinsics (TZCNT) for fast bit scanning
 #[inline]
-pub fn first_set_bit(bitmap: &[u64; 4]) -> Option<u8> {
+pub fn min_bit(bitmap: &[u64; 4]) -> Option<u8> {
     for (word_idx, &word) in bitmap.iter().enumerate() {
         if word != 0 {
             let bit_in_word = trailing_zeros(word) as usize;
@@ -23,18 +23,18 @@ pub fn first_set_bit(bitmap: &[u64; 4]) -> Option<u8> {
     None
 }
 
-/// Find last set bit (maximum).
+/// Find maximum set bit.
 ///
 /// # Arguments
 /// * `bitmap` - Reference to 4-word bitmap
 ///
 /// # Returns
-/// Index of last set bit, or None if bitmap is empty
+/// Index of maximum set bit, or None if bitmap is empty
 ///
 /// # Performance
 /// O(1) - uses CPU intrinsics (LZCNT) for fast bit scanning
 #[inline]
-pub fn last_set_bit(bitmap: &[u64; 4]) -> Option<u8> {
+pub fn max_bit(bitmap: &[u64; 4]) -> Option<u8> {
     for (word_idx, &word) in bitmap.iter().enumerate().rev() {
         if word != 0 {
             let bit_in_word = 63 - leading_zeros(word) as usize;
@@ -55,7 +55,7 @@ pub fn last_set_bit(bitmap: &[u64; 4]) -> Option<u8> {
 /// # Performance
 /// O(1) - uses CPU POPCNT instruction for fast counting
 #[inline]
-pub fn count_all(bitmap: &[u64; 4]) -> u32 {
+pub fn count_bits(bitmap: &[u64; 4]) -> u32 {
     popcount(bitmap[0]) + popcount(bitmap[1]) + popcount(bitmap[2]) + popcount(bitmap[3])
 }
 
@@ -207,84 +207,84 @@ mod tests {
     use crate::bitmap::{set_bit, set_range};
 
     #[test]
-    fn test_first_set_bit() {
+    fn test_min_bit() {
         // Empty bitmap
         let bitmap = [0u64; 4];
-        assert_eq!(first_set_bit(&bitmap), None);
+        assert_eq!(min_bit(&bitmap), None);
 
         // First word
         let mut bitmap = [0u64; 4];
         set_bit(&mut bitmap, 5);
-        assert_eq!(first_set_bit(&bitmap), Some(5));
+        assert_eq!(min_bit(&bitmap), Some(5));
 
         // Multiple bits - should return first
         set_bit(&mut bitmap, 10);
         set_bit(&mut bitmap, 100);
-        assert_eq!(first_set_bit(&bitmap), Some(5));
+        assert_eq!(min_bit(&bitmap), Some(5));
 
         // Second word
         let mut bitmap = [0u64; 4];
         set_bit(&mut bitmap, 67);
-        assert_eq!(first_set_bit(&bitmap), Some(67));
+        assert_eq!(min_bit(&bitmap), Some(67));
 
         // Last word
         let mut bitmap = [0u64; 4];
         set_bit(&mut bitmap, 255);
-        assert_eq!(first_set_bit(&bitmap), Some(255));
+        assert_eq!(min_bit(&bitmap), Some(255));
     }
 
     #[test]
-    fn test_last_set_bit() {
+    fn test_max_bit() {
         // Empty bitmap
         let bitmap = [0u64; 4];
-        assert_eq!(last_set_bit(&bitmap), None);
+        assert_eq!(max_bit(&bitmap), None);
 
         // Last word
         let mut bitmap = [0u64; 4];
         set_bit(&mut bitmap, 200);
-        assert_eq!(last_set_bit(&bitmap), Some(200));
+        assert_eq!(max_bit(&bitmap), Some(200));
 
         // Multiple bits - should return last
         set_bit(&mut bitmap, 5);
         set_bit(&mut bitmap, 100);
-        assert_eq!(last_set_bit(&bitmap), Some(200));
+        assert_eq!(max_bit(&bitmap), Some(200));
 
         // First word
         let mut bitmap = [0u64; 4];
         set_bit(&mut bitmap, 10);
-        assert_eq!(last_set_bit(&bitmap), Some(10));
+        assert_eq!(max_bit(&bitmap), Some(10));
 
         // Bit 255 (last possible)
         let mut bitmap = [0u64; 4];
         set_bit(&mut bitmap, 255);
-        assert_eq!(last_set_bit(&bitmap), Some(255));
+        assert_eq!(max_bit(&bitmap), Some(255));
     }
 
     #[test]
-    fn test_count_all() {
+    fn test_count_bits() {
         // Empty bitmap
         let bitmap = [0u64; 4];
-        assert_eq!(count_all(&bitmap), 0);
+        assert_eq!(count_bits(&bitmap), 0);
 
         // Single bit
         let mut bitmap = [0u64; 4];
         set_bit(&mut bitmap, 42);
-        assert_eq!(count_all(&bitmap), 1);
+        assert_eq!(count_bits(&bitmap), 1);
 
         // Multiple bits
         set_bit(&mut bitmap, 5);
         set_bit(&mut bitmap, 100);
         set_bit(&mut bitmap, 200);
-        assert_eq!(count_all(&bitmap), 4);
+        assert_eq!(count_bits(&bitmap), 4);
 
         // Range
         let mut bitmap = [0u64; 4];
         set_range(&mut bitmap, 10, 20);
-        assert_eq!(count_all(&bitmap), 10);
+        assert_eq!(count_bits(&bitmap), 10);
 
         // Full bitmap
         let bitmap = [!0u64; 4];
-        assert_eq!(count_all(&bitmap), 256);
+        assert_eq!(count_bits(&bitmap), 256);
     }
 
     #[test]
