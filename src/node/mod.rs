@@ -2,6 +2,9 @@
 
 use crate::constants::EMPTY;
 
+mod basic;
+mod state;
+
 /// Internal node with 256-way branching.
 ///
 /// Uses direct indexing for O(1) child access and bitmap for O(1) existence checks.
@@ -35,7 +38,7 @@ pub struct Node {
     /// Padding to align children to cache line boundary.
     ///
     /// Ensures bitmap occupies exactly one cache line (64 bytes).
-    _pad: [u64; 4],
+    pub(crate) _pad: [u64; 4],
 
     /// Direct-indexed children array.
     ///
@@ -51,7 +54,9 @@ impl Node {
     ///
     /// # Performance
     /// O(1) - uses array initialization
-    #[inline]
+    ///
+    /// Hot path for arena allocation - always inlined.
+    #[inline(always)]
     pub fn new() -> Self {
         Node {
             bitmap: [0; 4],
