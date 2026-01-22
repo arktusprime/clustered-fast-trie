@@ -14,6 +14,7 @@
 extern crate alloc;
 
 mod constants;
+mod bitmap;
 
 mod key;
 
