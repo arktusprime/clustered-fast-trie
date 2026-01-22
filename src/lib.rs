@@ -15,7 +15,7 @@ extern crate alloc;
 
 mod bitmap;
 mod constants;
-
 mod key;
+mod node;
 
 pub use key::TrieKey;
