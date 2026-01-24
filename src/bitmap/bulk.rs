@@ -207,7 +207,8 @@ mod tests {
 
     #[test]
     fn test_set_range() {
-        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+        const INIT: AtomicU64 = AtomicU64::new(0);
+        let bitmap = [INIT; 4];
 
         // Single word range
         set_range(&bitmap, 10, 20);
@@ -218,14 +219,14 @@ mod tests {
         assert!(!is_set(&bitmap, 20));
 
         // Cross word boundary
-        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+        let bitmap = [INIT; 4];
         set_range(&bitmap, 60, 70);
         for i in 60..70 {
             assert!(is_set(&bitmap, i));
         }
 
         // Full range
-        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+        let bitmap = [INIT; 4];
         set_range(&bitmap, 0, 256);
         for i in 0..=255 {
             assert!(is_set(&bitmap, i));
@@ -234,7 +235,8 @@ mod tests {
 
     #[test]
     fn test_clear_range() {
-        let bitmap = [AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0)];
+        const INIT: AtomicU64 = AtomicU64::new(!0);
+        let bitmap = [INIT; 4];
 
         // Single word range
         clear_range(&bitmap, 10, 20);
@@ -245,7 +247,7 @@ mod tests {
         assert!(is_set(&bitmap, 20));
 
         // Cross word boundary
-        let bitmap = [AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0)];
+        let bitmap = [INIT; 4];
         clear_range(&bitmap, 60, 70);
         for i in 60..70 {
             assert!(!is_set(&bitmap, i));
@@ -254,7 +256,8 @@ mod tests {
 
     #[test]
     fn test_set_bits() {
-        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+        const INIT: AtomicU64 = AtomicU64::new(0);
+        let bitmap = [INIT; 4];
         let indices = [5, 10, 15, 42, 100, 200, 255];
 
         set_bits(&bitmap, &indices);
@@ -268,7 +271,8 @@ mod tests {
 
     #[test]
     fn test_clear_bits() {
-        let bitmap = [AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0)];
+        const INIT: AtomicU64 = AtomicU64::new(!0);
+        let bitmap = [INIT; 4];
         let indices = [5, 10, 15, 42, 100, 200, 255];
 
         clear_bits(&bitmap, &indices);
@@ -282,7 +286,8 @@ mod tests {
 
     #[test]
     fn test_set_all() {
-        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+        const INIT: AtomicU64 = AtomicU64::new(0);
+        let bitmap = [INIT; 4];
         set_all(&bitmap);
 
         for i in 0..=255 {
@@ -292,7 +297,8 @@ mod tests {
 
     #[test]
     fn test_clear_all() {
-        let bitmap = [AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0)];
+        const INIT: AtomicU64 = AtomicU64::new(!0);
+        let bitmap = [INIT; 4];
         clear_all(&bitmap);
 
         for i in 0..=255 {

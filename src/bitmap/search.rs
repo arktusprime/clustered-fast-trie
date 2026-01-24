@@ -1,7 +1,7 @@
 //! Search operations for finding set bits in bitmap.
 
-use core::sync::atomic::{AtomicU64, Ordering};
 use crate::bitmap::{leading_zeros, popcount, trailing_zeros};
+use core::sync::atomic::{AtomicU64, Ordering};
 
 /// Find minimum set bit.
 ///
@@ -222,12 +222,14 @@ mod tests {
 
     #[test]
     fn test_min_bit() {
+        const INIT: AtomicU64 = AtomicU64::new(0);
+        
         // Empty bitmap
-        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+        let bitmap = [INIT; 4];
         assert_eq!(min_bit(&bitmap), None);
 
         // First word
-        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+        let bitmap = [INIT; 4];
         set_bit(&bitmap, 5);
         assert_eq!(min_bit(&bitmap), Some(5));
 
@@ -237,24 +239,26 @@ mod tests {
         assert_eq!(min_bit(&bitmap), Some(5));
 
         // Second word
-        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+        let bitmap = [INIT; 4];
         set_bit(&bitmap, 67);
         assert_eq!(min_bit(&bitmap), Some(67));
 
         // Last word
-        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+        let bitmap = [INIT; 4];
         set_bit(&bitmap, 255);
         assert_eq!(min_bit(&bitmap), Some(255));
     }
 
     #[test]
     fn test_max_bit() {
+        const INIT: AtomicU64 = AtomicU64::new(0);
+        
         // Empty bitmap
-        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+        let bitmap = [INIT; 4];
         assert_eq!(max_bit(&bitmap), None);
 
         // Last word
-        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+        let bitmap = [INIT; 4];
         set_bit(&bitmap, 200);
         assert_eq!(max_bit(&bitmap), Some(200));
 
@@ -264,24 +268,27 @@ mod tests {
         assert_eq!(max_bit(&bitmap), Some(200));
 
         // First word
-        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+        let bitmap = [INIT; 4];
         set_bit(&bitmap, 10);
         assert_eq!(max_bit(&bitmap), Some(10));
 
         // Bit 255 (last possible)
-        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+        let bitmap = [INIT; 4];
         set_bit(&bitmap, 255);
         assert_eq!(max_bit(&bitmap), Some(255));
     }
 
     #[test]
     fn test_count_bits() {
+        const INIT_ZERO: AtomicU64 = AtomicU64::new(0);
+        const INIT_FULL: AtomicU64 = AtomicU64::new(!0);
+        
         // Empty bitmap
-        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+        let bitmap = [INIT_ZERO; 4];
         assert_eq!(count_bits(&bitmap), 0);
 
         // Single bit
-        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+        let bitmap = [INIT_ZERO; 4];
         set_bit(&bitmap, 42);
         assert_eq!(count_bits(&bitmap), 1);
 
@@ -292,18 +299,19 @@ mod tests {
         assert_eq!(count_bits(&bitmap), 4);
 
         // Range
-        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+        let bitmap = [INIT_ZERO; 4];
         set_range(&bitmap, 10, 20);
         assert_eq!(count_bits(&bitmap), 10);
 
         // Full bitmap
-        let bitmap = [AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0)];
+        let bitmap = [INIT_FULL; 4];
         assert_eq!(count_bits(&bitmap), 256);
     }
 
     #[test]
     fn test_next_set_bit() {
-        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+        const INIT: AtomicU64 = AtomicU64::new(0);
+        let bitmap = [INIT; 4];
 
         // Set some bits
         set_bit(&bitmap, 5);
@@ -324,7 +332,8 @@ mod tests {
 
     #[test]
     fn test_prev_set_bit() {
-        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+        const INIT: AtomicU64 = AtomicU64::new(0);
+        let bitmap = [INIT; 4];
 
         // Set some bits
         set_bit(&bitmap, 5);
@@ -345,7 +354,8 @@ mod tests {
 
     #[test]
     fn test_count_range() {
-        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+        const INIT: AtomicU64 = AtomicU64::new(0);
+        let bitmap = [INIT; 4];
 
         // Set range [10, 20)
         set_range(&bitmap, 10, 20);
@@ -365,7 +375,7 @@ mod tests {
         assert_eq!(count_range(&bitmap, 15, 25), 5);
 
         // Cross word boundary
-        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+        let bitmap = [INIT; 4];
         set_range(&bitmap, 60, 70);
         assert_eq!(count_range(&bitmap, 60, 70), 10);
 
