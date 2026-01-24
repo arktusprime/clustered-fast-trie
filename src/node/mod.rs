@@ -1,7 +1,7 @@
 //! Internal node structure for 256-way branching trie.
 
-use core::sync::atomic::AtomicU64;
 use crate::constants::EMPTY;
+use core::sync::atomic::AtomicU64;
 
 mod basic;
 mod state;
@@ -18,28 +18,37 @@ mod state;
 ///
 /// # Cache Optimization
 /// - Aligned to 64-byte cache line boundary
-/// - Bitmap in dedicated cache line for fast access
+/// - Seq and bitmap in dedicated cache line for fast access
 /// - Children array starts at cache line boundary
 ///
 /// # Performance
 /// - Child access: O(1) via direct indexing
 /// - Existence check: O(1) via bitmap
 /// - Min/max child: O(1) via bitmap intrinsics (TZCNT/LZCNT)
+///
+/// # Concurrency
+/// - Seq counter for seqlock protocol (bulk operations)
+/// - Even = stable, odd = writer active
 #[repr(C, align(64))]
 pub struct Node {
+    /// Sequence counter for seqlock protocol.
+    ///
+    /// Used for bulk operations to ensure readers see consistent state.
+    /// Even value = stable, odd value = writer active.
+    pub seq: AtomicU64,
+
     /// Bitmap indicating which children exist (256 bits).
     ///
     /// Each bit corresponds to a child index (0-255).
     /// Bit set = child exists, bit clear = no child.
     ///
-    /// Placed first for cache locality (checked before children access).
     /// Uses AtomicU64 for lock-free multi-threading.
     pub bitmap: [AtomicU64; 4],
 
     /// Padding to align children to cache line boundary.
     ///
-    /// Ensures bitmap occupies exactly one cache line (64 bytes).
-    pub(crate) _pad: [u64; 4],
+    /// Ensures seq + bitmap occupy exactly one cache line (64 bytes).
+    pub(crate) _pad: [u64; 3],
 
     /// Direct-indexed children array.
     ///
@@ -60,13 +69,14 @@ impl Node {
     #[inline(always)]
     pub fn new() -> Self {
         Node {
+            seq: AtomicU64::new(0),
             bitmap: [
                 AtomicU64::new(0),
                 AtomicU64::new(0),
                 AtomicU64::new(0),
                 AtomicU64::new(0),
             ],
-            _pad: [0; 4],
+            _pad: [0; 3],
             children: [EMPTY; 256],
         }
     }
@@ -81,8 +91,9 @@ impl Default for Node {
 impl Clone for Node {
     fn clone(&self) -> Self {
         use core::sync::atomic::Ordering;
-        
+
         Node {
+            seq: AtomicU64::new(self.seq.load(Ordering::Relaxed)),
             bitmap: [
                 AtomicU64::new(self.bitmap[0].load(Ordering::Relaxed)),
                 AtomicU64::new(self.bitmap[1].load(Ordering::Relaxed)),
@@ -104,6 +115,9 @@ mod tests {
         use core::sync::atomic::Ordering;
         let node = Node::new();
 
+        // Seq should be 0 (even = stable)
+        assert_eq!(node.seq.load(Ordering::Relaxed), 0);
+
         // Bitmap should be empty
         assert_eq!(node.bitmap[0].load(Ordering::Relaxed), 0);
         assert_eq!(node.bitmap[1].load(Ordering::Relaxed), 0);
@@ -121,9 +135,11 @@ mod tests {
         use core::mem::{align_of, size_of};
 
         // Verify expected memory layout with cache line alignment
-        assert_eq!(size_of::<Node>(), 1088); // 32 + 32 + 1024 = 1088 bytes
+        assert_eq!(size_of::<Node>(), 1088); // 8 + 32 + 24 + 1024 = 1088 bytes
         assert_eq!(align_of::<Node>(), 64); // Aligned to cache line
-        assert_eq!(size_of::<[u64; 4]>(), 32);
+        assert_eq!(size_of::<AtomicU64>(), 8);
+        assert_eq!(size_of::<[AtomicU64; 4]>(), 32);
+        assert_eq!(size_of::<[u64; 3]>(), 24);
         assert_eq!(size_of::<[u32; 256]>(), 1024);
     }
 
@@ -131,6 +147,7 @@ mod tests {
     fn test_default() {
         use core::sync::atomic::Ordering;
         let node = Node::default();
+        assert_eq!(node.seq.load(Ordering::Relaxed), 0);
         assert_eq!(node.bitmap[0].load(Ordering::Relaxed), 0);
         assert_eq!(node.children[0], EMPTY);
     }
