@@ -1,5 +1,6 @@
 //! Internal node structure for 256-way branching trie.
 
+use core::sync::atomic::AtomicU64;
 use crate::constants::EMPTY;
 
 mod basic;
@@ -25,7 +26,6 @@ mod state;
 /// - Existence check: O(1) via bitmap
 /// - Min/max child: O(1) via bitmap intrinsics (TZCNT/LZCNT)
 #[repr(C, align(64))]
-#[derive(Clone)]
 pub struct Node {
     /// Bitmap indicating which children exist (256 bits).
     ///
@@ -33,7 +33,8 @@ pub struct Node {
     /// Bit set = child exists, bit clear = no child.
     ///
     /// Placed first for cache locality (checked before children access).
-    pub bitmap: [u64; 4],
+    /// Uses AtomicU64 for lock-free multi-threading.
+    pub bitmap: [AtomicU64; 4],
 
     /// Padding to align children to cache line boundary.
     ///
@@ -59,7 +60,12 @@ impl Node {
     #[inline(always)]
     pub fn new() -> Self {
         Node {
-            bitmap: [0; 4],
+            bitmap: [
+                AtomicU64::new(0),
+                AtomicU64::new(0),
+                AtomicU64::new(0),
+                AtomicU64::new(0),
+            ],
             _pad: [0; 4],
             children: [EMPTY; 256],
         }
@@ -72,16 +78,37 @@ impl Default for Node {
     }
 }
 
+impl Clone for Node {
+    fn clone(&self) -> Self {
+        use core::sync::atomic::Ordering;
+        
+        Node {
+            bitmap: [
+                AtomicU64::new(self.bitmap[0].load(Ordering::Relaxed)),
+                AtomicU64::new(self.bitmap[1].load(Ordering::Relaxed)),
+                AtomicU64::new(self.bitmap[2].load(Ordering::Relaxed)),
+                AtomicU64::new(self.bitmap[3].load(Ordering::Relaxed)),
+            ],
+            _pad: self._pad,
+            children: self.children,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_new_node() {
+        use core::sync::atomic::Ordering;
         let node = Node::new();
 
         // Bitmap should be empty
-        assert_eq!(node.bitmap, [0; 4]);
+        assert_eq!(node.bitmap[0].load(Ordering::Relaxed), 0);
+        assert_eq!(node.bitmap[1].load(Ordering::Relaxed), 0);
+        assert_eq!(node.bitmap[2].load(Ordering::Relaxed), 0);
+        assert_eq!(node.bitmap[3].load(Ordering::Relaxed), 0);
 
         // All children should be EMPTY
         for i in 0..256 {
@@ -102,8 +129,9 @@ mod tests {
 
     #[test]
     fn test_default() {
+        use core::sync::atomic::Ordering;
         let node = Node::default();
-        assert_eq!(node.bitmap, [0; 4]);
+        assert_eq!(node.bitmap[0].load(Ordering::Relaxed), 0);
         assert_eq!(node.children[0], EMPTY);
     }
 }

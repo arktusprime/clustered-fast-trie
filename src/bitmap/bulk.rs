@@ -1,16 +1,18 @@
 //! Bulk operations for setting/clearing multiple bits efficiently.
 
+use core::sync::atomic::{AtomicU64, Ordering};
+
 /// Set a range of bits [from, to) in the bitmap.
 ///
 /// # Arguments
-/// * `bitmap` - Mutable reference to 4-word bitmap
+/// * `bitmap` - Reference to 4-word atomic bitmap
 /// * `from` - Start index (inclusive, 0-255)
 /// * `to` - End index (exclusive, 0-256)
 ///
 /// # Performance
 /// O(1) - processes up to 4 words with bitwise operations
 #[inline]
-pub fn set_range(bitmap: &mut [u64; 4], from: u8, to: u16) {
+pub fn set_range(bitmap: &[AtomicU64; 4], from: u8, to: u16) {
     if from as u16 >= to {
         return;
     }
@@ -30,23 +32,23 @@ pub fn set_range(bitmap: &mut [u64; 4], from: u8, to: u16) {
         } else {
             ((!0u64) << from_bit) & ((1u64 << to_bit) - 1)
         };
-        bitmap[from_word] |= mask;
+        bitmap[from_word].fetch_or(mask, Ordering::Relaxed);
     } else {
         // First word: from_bit to 63
         let from_bit = from % 64;
-        bitmap[from_word] |= !0u64 << from_bit;
+        bitmap[from_word].fetch_or(!0u64 << from_bit, Ordering::Relaxed);
 
         // Middle words: all bits
         for w in (from_word + 1)..to_word {
-            bitmap[w] = !0u64;
+            bitmap[w].store(!0u64, Ordering::Relaxed);
         }
 
         // Last word: 0 to to_bit
         let to_bit = to % 64;
         if to_bit > 0 {
-            bitmap[to_word] |= (1u64 << to_bit) - 1;
+            bitmap[to_word].fetch_or((1u64 << to_bit) - 1, Ordering::Relaxed);
         } else if to_word < 4 {
-            bitmap[to_word] = !0u64;
+            bitmap[to_word].store(!0u64, Ordering::Relaxed);
         }
     }
 }
@@ -54,14 +56,14 @@ pub fn set_range(bitmap: &mut [u64; 4], from: u8, to: u16) {
 /// Clear a range of bits [from, to) in the bitmap.
 ///
 /// # Arguments
-/// * `bitmap` - Mutable reference to 4-word bitmap
+/// * `bitmap` - Reference to 4-word atomic bitmap
 /// * `from` - Start index (inclusive, 0-255)
 /// * `to` - End index (exclusive, 0-256)
 ///
 /// # Performance
 /// O(1) - processes up to 4 words with bitwise operations
 #[inline]
-pub fn clear_range(bitmap: &mut [u64; 4], from: u8, to: u16) {
+pub fn clear_range(bitmap: &[AtomicU64; 4], from: u8, to: u16) {
     if from as u16 >= to {
         return;
     }
@@ -81,23 +83,23 @@ pub fn clear_range(bitmap: &mut [u64; 4], from: u8, to: u16) {
         } else {
             ((!0u64) << from_bit) & ((1u64 << to_bit) - 1)
         };
-        bitmap[from_word] &= !mask;
+        bitmap[from_word].fetch_and(!mask, Ordering::Relaxed);
     } else {
         // First word: from_bit to 63
         let from_bit = from % 64;
-        bitmap[from_word] &= !(!0u64 << from_bit);
+        bitmap[from_word].fetch_and(!(!0u64 << from_bit), Ordering::Relaxed);
 
         // Middle words: all bits
         for w in (from_word + 1)..to_word {
-            bitmap[w] = 0;
+            bitmap[w].store(0, Ordering::Relaxed);
         }
 
         // Last word: 0 to to_bit
         let to_bit = to % 64;
         if to_bit > 0 {
-            bitmap[to_word] &= !((1u64 << to_bit) - 1);
+            bitmap[to_word].fetch_and(!((1u64 << to_bit) - 1), Ordering::Relaxed);
         } else if to_word < 4 {
-            bitmap[to_word] = 0;
+            bitmap[to_word].store(0, Ordering::Relaxed);
         }
     }
 }
@@ -108,13 +110,13 @@ pub fn clear_range(bitmap: &mut [u64; 4], from: u8, to: u16) {
 /// Works efficiently with both sorted and unsorted indices.
 ///
 /// # Arguments
-/// * `bitmap` - Mutable reference to 4-word bitmap
+/// * `bitmap` - Reference to 4-word atomic bitmap
 /// * `indices` - Slice of bit indices to set (0-255)
 ///
 /// # Performance
 /// O(n) where n = indices.len(), with stable performance regardless of index order
 #[inline]
-pub fn set_bits(bitmap: &mut [u64; 4], indices: &[u8]) {
+pub fn set_bits(bitmap: &[AtomicU64; 4], indices: &[u8]) {
     if indices.is_empty() {
         return;
     }
@@ -129,10 +131,10 @@ pub fn set_bits(bitmap: &mut [u64; 4], indices: &[u8]) {
     }
 
     // Apply all masks (SIMD-friendly)
-    bitmap[0] |= masks[0];
-    bitmap[1] |= masks[1];
-    bitmap[2] |= masks[2];
-    bitmap[3] |= masks[3];
+    bitmap[0].fetch_or(masks[0], Ordering::Relaxed);
+    bitmap[1].fetch_or(masks[1], Ordering::Relaxed);
+    bitmap[2].fetch_or(masks[2], Ordering::Relaxed);
+    bitmap[3].fetch_or(masks[3], Ordering::Relaxed);
 }
 
 /// Clear multiple bits at specified indices.
@@ -141,13 +143,13 @@ pub fn set_bits(bitmap: &mut [u64; 4], indices: &[u8]) {
 /// Works efficiently with both sorted and unsorted indices.
 ///
 /// # Arguments
-/// * `bitmap` - Mutable reference to 4-word bitmap
+/// * `bitmap` - Reference to 4-word atomic bitmap
 /// * `indices` - Slice of bit indices to clear (0-255)
 ///
 /// # Performance
 /// O(n) where n = indices.len(), with stable performance regardless of index order
 #[inline]
-pub fn clear_bits(bitmap: &mut [u64; 4], indices: &[u8]) {
+pub fn clear_bits(bitmap: &[AtomicU64; 4], indices: &[u8]) {
     if indices.is_empty() {
         return;
     }
@@ -162,53 +164,53 @@ pub fn clear_bits(bitmap: &mut [u64; 4], indices: &[u8]) {
     }
 
     // Apply all masks (SIMD-friendly)
-    bitmap[0] &= !masks[0];
-    bitmap[1] &= !masks[1];
-    bitmap[2] &= !masks[2];
-    bitmap[3] &= !masks[3];
+    bitmap[0].fetch_and(!masks[0], Ordering::Relaxed);
+    bitmap[1].fetch_and(!masks[1], Ordering::Relaxed);
+    bitmap[2].fetch_and(!masks[2], Ordering::Relaxed);
+    bitmap[3].fetch_and(!masks[3], Ordering::Relaxed);
 }
 
 /// Set all 256 bits in the bitmap.
 ///
 /// # Arguments
-/// * `bitmap` - Mutable reference to 4-word bitmap
+/// * `bitmap` - Reference to 4-word atomic bitmap
 ///
 /// # Performance
 /// O(1) - SIMD-friendly, 4 independent stores
 #[inline]
-pub fn set_all(bitmap: &mut [u64; 4]) {
-    bitmap[0] = !0u64;
-    bitmap[1] = !0u64;
-    bitmap[2] = !0u64;
-    bitmap[3] = !0u64;
+pub fn set_all(bitmap: &[AtomicU64; 4]) {
+    bitmap[0].store(!0u64, Ordering::Relaxed);
+    bitmap[1].store(!0u64, Ordering::Relaxed);
+    bitmap[2].store(!0u64, Ordering::Relaxed);
+    bitmap[3].store(!0u64, Ordering::Relaxed);
 }
 
 /// Clear all 256 bits in the bitmap.
 ///
 /// # Arguments
-/// * `bitmap` - Mutable reference to 4-word bitmap
+/// * `bitmap` - Reference to 4-word atomic bitmap
 ///
 /// # Performance
 /// O(1) - SIMD-friendly, 4 independent stores
 #[inline]
-pub fn clear_all(bitmap: &mut [u64; 4]) {
-    bitmap[0] = 0;
-    bitmap[1] = 0;
-    bitmap[2] = 0;
-    bitmap[3] = 0;
+pub fn clear_all(bitmap: &[AtomicU64; 4]) {
+    bitmap[0].store(0, Ordering::Relaxed);
+    bitmap[1].store(0, Ordering::Relaxed);
+    bitmap[2].store(0, Ordering::Relaxed);
+    bitmap[3].store(0, Ordering::Relaxed);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bitmap::{is_set, set_bit};
+    use crate::bitmap::is_set;
 
     #[test]
     fn test_set_range() {
-        let mut bitmap = [0u64; 4];
+        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
 
         // Single word range
-        set_range(&mut bitmap, 10, 20);
+        set_range(&bitmap, 10, 20);
         for i in 10..20 {
             assert!(is_set(&bitmap, i));
         }
@@ -216,15 +218,15 @@ mod tests {
         assert!(!is_set(&bitmap, 20));
 
         // Cross word boundary
-        let mut bitmap = [0u64; 4];
-        set_range(&mut bitmap, 60, 70);
+        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+        set_range(&bitmap, 60, 70);
         for i in 60..70 {
             assert!(is_set(&bitmap, i));
         }
 
         // Full range
-        let mut bitmap = [0u64; 4];
-        set_range(&mut bitmap, 0, 256);
+        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+        set_range(&bitmap, 0, 256);
         for i in 0..=255 {
             assert!(is_set(&bitmap, i));
         }
@@ -232,10 +234,10 @@ mod tests {
 
     #[test]
     fn test_clear_range() {
-        let mut bitmap = [!0u64; 4];
+        let bitmap = [AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0)];
 
         // Single word range
-        clear_range(&mut bitmap, 10, 20);
+        clear_range(&bitmap, 10, 20);
         for i in 10..20 {
             assert!(!is_set(&bitmap, i));
         }
@@ -243,8 +245,8 @@ mod tests {
         assert!(is_set(&bitmap, 20));
 
         // Cross word boundary
-        let mut bitmap = [!0u64; 4];
-        clear_range(&mut bitmap, 60, 70);
+        let bitmap = [AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0)];
+        clear_range(&bitmap, 60, 70);
         for i in 60..70 {
             assert!(!is_set(&bitmap, i));
         }
@@ -252,10 +254,10 @@ mod tests {
 
     #[test]
     fn test_set_bits() {
-        let mut bitmap = [0u64; 4];
+        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
         let indices = [5, 10, 15, 42, 100, 200, 255];
 
-        set_bits(&mut bitmap, &indices);
+        set_bits(&bitmap, &indices);
 
         for &idx in &indices {
             assert!(is_set(&bitmap, idx));
@@ -266,10 +268,10 @@ mod tests {
 
     #[test]
     fn test_clear_bits() {
-        let mut bitmap = [!0u64; 4];
+        let bitmap = [AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0)];
         let indices = [5, 10, 15, 42, 100, 200, 255];
 
-        clear_bits(&mut bitmap, &indices);
+        clear_bits(&bitmap, &indices);
 
         for &idx in &indices {
             assert!(!is_set(&bitmap, idx));
@@ -280,8 +282,8 @@ mod tests {
 
     #[test]
     fn test_set_all() {
-        let mut bitmap = [0u64; 4];
-        set_all(&mut bitmap);
+        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+        set_all(&bitmap);
 
         for i in 0..=255 {
             assert!(is_set(&bitmap, i));
@@ -290,8 +292,8 @@ mod tests {
 
     #[test]
     fn test_clear_all() {
-        let mut bitmap = [!0u64; 4];
-        clear_all(&mut bitmap);
+        let bitmap = [AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0)];
+        clear_all(&bitmap);
 
         for i in 0..=255 {
             assert!(!is_set(&bitmap, i));

@@ -1,9 +1,11 @@
 //! Check operations for validating bitmap state.
 
+use core::sync::atomic::{AtomicU64, Ordering};
+
 /// Check if all bits in range [from, to) are set.
 ///
 /// # Arguments
-/// * `bitmap` - Reference to 4-word bitmap
+/// * `bitmap` - Reference to 4-word atomic bitmap
 /// * `from` - Start index (inclusive, 0-255)
 /// * `to` - End index (exclusive, 0-256)
 ///
@@ -13,7 +15,7 @@
 /// # Performance
 /// O(1) - processes up to 4 words with bitwise operations
 #[inline]
-pub fn is_range_set(bitmap: &[u64; 4], from: u8, to: u16) -> bool {
+pub fn is_range_set(bitmap: &[AtomicU64; 4], from: u8, to: u16) -> bool {
     if from as u16 >= to {
         return true; // Empty range
     }
@@ -33,19 +35,21 @@ pub fn is_range_set(bitmap: &[u64; 4], from: u8, to: u16) -> bool {
         } else {
             ((!0u64) << from_bit) & ((1u64 << to_bit) - 1)
         };
-        return (bitmap[from_word] & mask) == mask;
+        let value = bitmap[from_word].load(Ordering::Acquire);
+        return (value & mask) == mask;
     }
 
     // First word: from_bit to 63
     let from_bit = from % 64;
     let first_mask = !0u64 << from_bit;
-    if (bitmap[from_word] & first_mask) != first_mask {
+    let first_value = bitmap[from_word].load(Ordering::Acquire);
+    if (first_value & first_mask) != first_mask {
         return false;
     }
 
     // Middle words: all bits
     for w in (from_word + 1)..to_word {
-        if bitmap[w] != !0u64 {
+        if bitmap[w].load(Ordering::Acquire) != !0u64 {
             return false;
         }
     }
@@ -54,11 +58,12 @@ pub fn is_range_set(bitmap: &[u64; 4], from: u8, to: u16) -> bool {
     let to_bit = to % 64;
     if to_bit > 0 {
         let last_mask = (1u64 << to_bit) - 1;
-        if (bitmap[to_word] & last_mask) != last_mask {
+        let last_value = bitmap[to_word].load(Ordering::Acquire);
+        if (last_value & last_mask) != last_mask {
             return false;
         }
     } else if to_word < 4 {
-        if bitmap[to_word] != !0u64 {
+        if bitmap[to_word].load(Ordering::Acquire) != !0u64 {
             return false;
         }
     }
@@ -69,7 +74,7 @@ pub fn is_range_set(bitmap: &[u64; 4], from: u8, to: u16) -> bool {
 /// Check if all specified bits are set.
 ///
 /// # Arguments
-/// * `bitmap` - Reference to 4-word bitmap
+/// * `bitmap` - Reference to 4-word atomic bitmap
 /// * `indices` - Slice of bit indices to check (0-255)
 ///
 /// # Returns
@@ -78,7 +83,7 @@ pub fn is_range_set(bitmap: &[u64; 4], from: u8, to: u16) -> bool {
 /// # Performance
 /// O(n) where n = indices.len(), with stable performance regardless of index order
 #[inline]
-pub fn are_bits_set(bitmap: &[u64; 4], indices: &[u8]) -> bool {
+pub fn are_bits_set(bitmap: &[AtomicU64; 4], indices: &[u8]) -> bool {
     if indices.is_empty() {
         return true; // Empty set
     }
@@ -92,17 +97,22 @@ pub fn are_bits_set(bitmap: &[u64; 4], indices: &[u8]) -> bool {
         masks[word] |= 1u64 << bit;
     }
 
-    // Check all masks
-    (bitmap[0] & masks[0]) == masks[0]
-        && (bitmap[1] & masks[1]) == masks[1]
-        && (bitmap[2] & masks[2]) == masks[2]
-        && (bitmap[3] & masks[3]) == masks[3]
+    // Check all masks with atomic loads
+    let w0 = bitmap[0].load(Ordering::Acquire);
+    let w1 = bitmap[1].load(Ordering::Acquire);
+    let w2 = bitmap[2].load(Ordering::Acquire);
+    let w3 = bitmap[3].load(Ordering::Acquire);
+
+    (w0 & masks[0]) == masks[0]
+        && (w1 & masks[1]) == masks[1]
+        && (w2 & masks[2]) == masks[2]
+        && (w3 & masks[3]) == masks[3]
 }
 
 /// Check if bitmap is empty (no bits set).
 ///
 /// # Arguments
-/// * `bitmap` - Reference to 4-word bitmap
+/// * `bitmap` - Reference to 4-word atomic bitmap
 ///
 /// # Returns
 /// `true` if no bits are set, `false` otherwise
@@ -110,14 +120,18 @@ pub fn are_bits_set(bitmap: &[u64; 4], indices: &[u8]) -> bool {
 /// # Performance
 /// O(1) - uses OR reduction (SIMD-friendly, fewer branches)
 #[inline]
-pub fn is_empty(bitmap: &[u64; 4]) -> bool {
-    (bitmap[0] | bitmap[1] | bitmap[2] | bitmap[3]) == 0
+pub fn is_empty(bitmap: &[AtomicU64; 4]) -> bool {
+    let w0 = bitmap[0].load(Ordering::Acquire);
+    let w1 = bitmap[1].load(Ordering::Acquire);
+    let w2 = bitmap[2].load(Ordering::Acquire);
+    let w3 = bitmap[3].load(Ordering::Acquire);
+    (w0 | w1 | w2 | w3) == 0
 }
 
 /// Check if bitmap is full (all bits set).
 ///
 /// # Arguments
-/// * `bitmap` - Reference to 4-word bitmap
+/// * `bitmap` - Reference to 4-word atomic bitmap
 ///
 /// # Returns
 /// `true` if all bits are set, `false` otherwise
@@ -125,8 +139,12 @@ pub fn is_empty(bitmap: &[u64; 4]) -> bool {
 /// # Performance
 /// O(1) - uses AND reduction (SIMD-friendly, fewer branches)
 #[inline]
-pub fn is_full(bitmap: &[u64; 4]) -> bool {
-    (bitmap[0] & bitmap[1] & bitmap[2] & bitmap[3]) == !0u64
+pub fn is_full(bitmap: &[AtomicU64; 4]) -> bool {
+    let w0 = bitmap[0].load(Ordering::Acquire);
+    let w1 = bitmap[1].load(Ordering::Acquire);
+    let w2 = bitmap[2].load(Ordering::Acquire);
+    let w3 = bitmap[3].load(Ordering::Acquire);
+    (w0 & w1 & w2 & w3) == !0u64
 }
 
 #[cfg(test)]
@@ -136,10 +154,10 @@ mod tests {
 
     #[test]
     fn test_is_range_set() {
-        let mut bitmap = [0u64; 4];
+        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
 
         // Set range [10, 20)
-        set_range(&mut bitmap, 10, 20);
+        set_range(&bitmap, 10, 20);
 
         // Check exact range
         assert!(is_range_set(&bitmap, 10, 20));
@@ -152,14 +170,14 @@ mod tests {
         assert!(!is_range_set(&bitmap, 10, 21));
 
         // Check cross-word boundary
-        let mut bitmap = [0u64; 4];
-        set_range(&mut bitmap, 60, 70);
+        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+        set_range(&bitmap, 60, 70);
         assert!(is_range_set(&bitmap, 60, 70));
         assert!(is_range_set(&bitmap, 62, 68));
         assert!(!is_range_set(&bitmap, 59, 70));
 
         // Check full range
-        let bitmap = [!0u64; 4];
+        let bitmap = [AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0)];
         assert!(is_range_set(&bitmap, 0, 256));
 
         // Check empty range
@@ -168,11 +186,11 @@ mod tests {
 
     #[test]
     fn test_are_bits_set() {
-        let mut bitmap = [0u64; 4];
+        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
 
         // Set specific bits
         let indices = [5, 10, 15, 42, 100, 200, 255];
-        set_bits(&mut bitmap, &indices);
+        set_bits(&bitmap, &indices);
 
         // Check all are set
         assert!(are_bits_set(&bitmap, &indices));
@@ -195,27 +213,27 @@ mod tests {
 
     #[test]
     fn test_is_empty() {
-        let bitmap = [0u64; 4];
+        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
         assert!(is_empty(&bitmap));
 
-        let mut bitmap = [0u64; 4];
-        set_bit(&mut bitmap, 42);
+        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+        set_bit(&bitmap, 42);
         assert!(!is_empty(&bitmap));
 
-        let bitmap = [!0u64; 4];
+        let bitmap = [AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0)];
         assert!(!is_empty(&bitmap));
     }
 
     #[test]
     fn test_is_full() {
-        let bitmap = [!0u64; 4];
+        let bitmap = [AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0)];
         assert!(is_full(&bitmap));
 
-        let mut bitmap = [!0u64; 4];
-        clear_bit(&mut bitmap, 42);
+        let bitmap = [AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0)];
+        clear_bit(&bitmap, 42);
         assert!(!is_full(&bitmap));
 
-        let bitmap = [0u64; 4];
+        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
         assert!(!is_full(&bitmap));
     }
 }
