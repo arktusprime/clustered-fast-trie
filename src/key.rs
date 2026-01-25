@@ -45,6 +45,17 @@ pub trait TrieKey: Copy + Eq + Sized {
     /// # Performance
     /// O(1) - single cast operation
     fn last_byte(self) -> u8;
+
+    /// Convert key to u128 for arithmetic operations.
+    ///
+    /// Used for key transposition and arena index calculations.
+    ///
+    /// # Returns
+    /// Key value as u128
+    ///
+    /// # Performance
+    /// O(1) - zero-cost for u128, single cast for u32/u64
+    fn to_u128(self) -> u128;
 }
 
 impl TrieKey for u32 {
@@ -65,6 +76,11 @@ impl TrieKey for u32 {
     #[inline(always)]
     fn last_byte(self) -> u8 {
         self as u8
+    }
+
+    #[inline(always)]
+    fn to_u128(self) -> u128 {
+        self as u128
     }
 }
 
@@ -87,6 +103,11 @@ impl TrieKey for u64 {
     fn last_byte(self) -> u8 {
         self as u8
     }
+
+    #[inline(always)]
+    fn to_u128(self) -> u128 {
+        self as u128
+    }
 }
 
 impl TrieKey for u128 {
@@ -107,6 +128,11 @@ impl TrieKey for u128 {
     #[inline(always)]
     fn last_byte(self) -> u8 {
         self as u8
+    }
+
+    #[inline(always)]
+    fn to_u128(self) -> u128 {
+        self
     }
 }
 
