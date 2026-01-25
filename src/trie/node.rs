@@ -3,9 +3,6 @@
 use crate::constants::EMPTY;
 use core::sync::atomic::AtomicU64;
 
-mod basic;
-mod state;
-
 /// Internal node with 256-way branching.
 ///
 /// Uses direct indexing for O(1) child access and bitmap for O(1) existence checks.

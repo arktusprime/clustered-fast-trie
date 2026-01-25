@@ -2,7 +2,7 @@
 
 use crate::bitmap;
 use crate::constants::EMPTY;
-use crate::node::Node;
+use crate::trie::Node;
 
 impl Node {
     /// Check if child exists at given byte index.

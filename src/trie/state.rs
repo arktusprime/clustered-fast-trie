@@ -1,7 +1,7 @@
 //! Node state checking operations.
 
 use crate::bitmap;
-use crate::node::Node;
+use crate::trie::Node;
 
 impl Node {
     /// Check if node has no children.
