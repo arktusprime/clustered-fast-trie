@@ -419,7 +419,7 @@ mod tests {
     #[test]
     fn test_min_bit() {
         const INIT: AtomicU64 = AtomicU64::new(0);
-        
+
         // Empty bitmap
         let bitmap = [INIT; 4];
         assert_eq!(min_bit(&bitmap), None);
@@ -448,7 +448,7 @@ mod tests {
     #[test]
     fn test_max_bit() {
         const INIT: AtomicU64 = AtomicU64::new(0);
-        
+
         // Empty bitmap
         let bitmap = [INIT; 4];
         assert_eq!(max_bit(&bitmap), None);
@@ -478,7 +478,7 @@ mod tests {
     fn test_count_bits() {
         const INIT_ZERO: AtomicU64 = AtomicU64::new(0);
         const INIT_FULL: AtomicU64 = AtomicU64::new(!0);
-        
+
         // Empty bitmap
         let bitmap = [INIT_ZERO; 4];
         assert_eq!(count_bits(&bitmap), 0);

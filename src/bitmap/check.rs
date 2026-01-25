@@ -287,7 +287,7 @@ mod tests {
     fn test_is_range_set() {
         const INIT_ZERO: AtomicU64 = AtomicU64::new(0);
         const INIT_FULL: AtomicU64 = AtomicU64::new(!0);
-        
+
         let bitmap = [INIT_ZERO; 4];
 
         // Set range [10, 20)
@@ -350,7 +350,7 @@ mod tests {
     fn test_is_empty() {
         const INIT_ZERO: AtomicU64 = AtomicU64::new(0);
         const INIT_FULL: AtomicU64 = AtomicU64::new(!0);
-        
+
         let bitmap = [INIT_ZERO; 4];
         assert!(is_empty(&bitmap));
 
@@ -366,7 +366,7 @@ mod tests {
     fn test_is_full() {
         const INIT_ZERO: AtomicU64 = AtomicU64::new(0);
         const INIT_FULL: AtomicU64 = AtomicU64::new(!0);
-        
+
         let bitmap = [INIT_FULL; 4];
         assert!(is_full(&bitmap));
 

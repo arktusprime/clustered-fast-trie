@@ -1,0 +1,18 @@
+//! Arena allocator for multi-tenant memory management
+//!
+//! This module provides the arena allocation system for clustered-fast-trie,
+//! supporting flexible key ranges, lazy allocation, and transparent defragmentation.
+
+pub mod allocator;
+pub mod arena;
+pub mod defrag;
+pub mod free_list;
+pub mod handle;
+pub mod numa;
+pub mod segment;
+
+// Re-exports
+pub use allocator::ArenaAllocator;
+pub use arena::Arena;
+pub use handle::SegmentHandle;
+pub use segment::{KeyRange, SegmentId, SegmentMeta};

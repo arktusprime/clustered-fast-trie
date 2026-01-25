@@ -12,8 +12,8 @@ mod search;
 // Re-export all public functions
 pub use basic::{clear_bit, is_set, is_set_seqlock, set_bit, test_and_set_bit};
 pub use bulk::{
-    clear_all, clear_bits, clear_bits_seqlock, clear_range, clear_range_seqlock, set_all,
-    set_bits, set_bits_seqlock, set_range, set_range_seqlock,
+    clear_all, clear_bits, clear_bits_seqlock, clear_range, clear_range_seqlock, set_all, set_bits,
+    set_bits_seqlock, set_range, set_range_seqlock,
 };
 pub use check::{
     are_bits_set, are_bits_set_seqlock, is_empty, is_empty_seqlock, is_full, is_full_seqlock,
