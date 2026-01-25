@@ -154,7 +154,10 @@ mod tests {
 
     #[test]
     fn test_is_range_set() {
-        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+        const INIT_ZERO: AtomicU64 = AtomicU64::new(0);
+        const INIT_FULL: AtomicU64 = AtomicU64::new(!0);
+        
+        let bitmap = [INIT_ZERO; 4];
 
         // Set range [10, 20)
         set_range(&bitmap, 10, 20);
@@ -170,14 +173,14 @@ mod tests {
         assert!(!is_range_set(&bitmap, 10, 21));
 
         // Check cross-word boundary
-        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+        let bitmap = [INIT_ZERO; 4];
         set_range(&bitmap, 60, 70);
         assert!(is_range_set(&bitmap, 60, 70));
         assert!(is_range_set(&bitmap, 62, 68));
         assert!(!is_range_set(&bitmap, 59, 70));
 
         // Check full range
-        let bitmap = [AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0)];
+        let bitmap = [INIT_FULL; 4];
         assert!(is_range_set(&bitmap, 0, 256));
 
         // Check empty range
@@ -186,7 +189,8 @@ mod tests {
 
     #[test]
     fn test_are_bits_set() {
-        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+        const INIT: AtomicU64 = AtomicU64::new(0);
+        let bitmap = [INIT; 4];
 
         // Set specific bits
         let indices = [5, 10, 15, 42, 100, 200, 255];
@@ -213,27 +217,33 @@ mod tests {
 
     #[test]
     fn test_is_empty() {
-        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+        const INIT_ZERO: AtomicU64 = AtomicU64::new(0);
+        const INIT_FULL: AtomicU64 = AtomicU64::new(!0);
+        
+        let bitmap = [INIT_ZERO; 4];
         assert!(is_empty(&bitmap));
 
-        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+        let bitmap = [INIT_ZERO; 4];
         set_bit(&bitmap, 42);
         assert!(!is_empty(&bitmap));
 
-        let bitmap = [AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0)];
+        let bitmap = [INIT_FULL; 4];
         assert!(!is_empty(&bitmap));
     }
 
     #[test]
     fn test_is_full() {
-        let bitmap = [AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0)];
+        const INIT_ZERO: AtomicU64 = AtomicU64::new(0);
+        const INIT_FULL: AtomicU64 = AtomicU64::new(!0);
+        
+        let bitmap = [INIT_FULL; 4];
         assert!(is_full(&bitmap));
 
-        let bitmap = [AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0), AtomicU64::new(!0)];
+        let bitmap = [INIT_FULL; 4];
         clear_bit(&bitmap, 42);
         assert!(!is_full(&bitmap));
 
-        let bitmap = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+        let bitmap = [INIT_ZERO; 4];
         assert!(!is_full(&bitmap));
     }
 }
