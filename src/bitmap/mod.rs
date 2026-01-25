@@ -10,7 +10,7 @@ mod intrinsics;
 mod search;
 
 // Re-export all public functions
-pub use basic::{clear_bit, is_set, set_bit};
+pub use basic::{clear_bit, is_set, set_bit, test_and_set_bit};
 pub use bulk::{clear_all, clear_bits, clear_range, set_all, set_bits, set_range};
 pub use check::{are_bits_set, is_empty, is_full, is_range_set};
 pub use intrinsics::{leading_zeros, popcount, trailing_zeros};
