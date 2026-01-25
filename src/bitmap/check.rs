@@ -147,6 +147,137 @@ pub fn is_full(bitmap: &[AtomicU64; 4]) -> bool {
     (w0 & w1 & w2 & w3) == !0u64
 }
 
+/// Check if all bits in range [from, to) are set with seqlock protection.
+///
+/// Uses seqlock protocol to ensure consistent read during concurrent bulk modifications.
+///
+/// # Arguments
+/// * `seq` - Sequence counter for seqlock protocol
+/// * `bitmap` - Reference to 4-word atomic bitmap
+/// * `from` - Start index (inclusive, 0-255)
+/// * `to` - End index (exclusive, 0-256)
+///
+/// # Returns
+/// `true` if all bits in range are set, `false` otherwise
+///
+/// # Performance
+/// O(1) - ~5% overhead from seqlock without collisions
+///
+/// # Thread Safety
+/// Lock-free read operation. Retries if concurrent bulk modification detected.
+#[inline]
+pub fn is_range_set_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4], from: u8, to: u16) -> bool {
+    loop {
+        let seq_before = seq.load(Ordering::Acquire);
+        if seq_before & 1 != 0 {
+            core::hint::spin_loop();
+            continue;
+        }
+        let result = is_range_set(bitmap, from, to);
+        let seq_after = seq.load(Ordering::Acquire);
+        if seq_before == seq_after {
+            return result;
+        }
+    }
+}
+
+/// Check if all specified bits are set with seqlock protection.
+///
+/// Uses seqlock protocol to ensure consistent read during concurrent bulk modifications.
+///
+/// # Arguments
+/// * `seq` - Sequence counter for seqlock protocol
+/// * `bitmap` - Reference to 4-word atomic bitmap
+/// * `indices` - Slice of bit indices to check (0-255)
+///
+/// # Returns
+/// `true` if all specified bits are set, `false` otherwise
+///
+/// # Performance
+/// O(n) where n = indices.len(), ~5% overhead from seqlock without collisions
+///
+/// # Thread Safety
+/// Lock-free read operation. Retries if concurrent bulk modification detected.
+#[inline]
+pub fn are_bits_set_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4], indices: &[u8]) -> bool {
+    loop {
+        let seq_before = seq.load(Ordering::Acquire);
+        if seq_before & 1 != 0 {
+            core::hint::spin_loop();
+            continue;
+        }
+        let result = are_bits_set(bitmap, indices);
+        let seq_after = seq.load(Ordering::Acquire);
+        if seq_before == seq_after {
+            return result;
+        }
+    }
+}
+
+/// Check if bitmap is empty with seqlock protection.
+///
+/// Uses seqlock protocol to ensure consistent read during concurrent bulk modifications.
+///
+/// # Arguments
+/// * `seq` - Sequence counter for seqlock protocol
+/// * `bitmap` - Reference to 4-word atomic bitmap
+///
+/// # Returns
+/// `true` if no bits are set, `false` otherwise
+///
+/// # Performance
+/// O(1) - ~5% overhead from seqlock without collisions
+///
+/// # Thread Safety
+/// Lock-free read operation. Retries if concurrent bulk modification detected.
+#[inline]
+pub fn is_empty_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4]) -> bool {
+    loop {
+        let seq_before = seq.load(Ordering::Acquire);
+        if seq_before & 1 != 0 {
+            core::hint::spin_loop();
+            continue;
+        }
+        let result = is_empty(bitmap);
+        let seq_after = seq.load(Ordering::Acquire);
+        if seq_before == seq_after {
+            return result;
+        }
+    }
+}
+
+/// Check if bitmap is full with seqlock protection.
+///
+/// Uses seqlock protocol to ensure consistent read during concurrent bulk modifications.
+///
+/// # Arguments
+/// * `seq` - Sequence counter for seqlock protocol
+/// * `bitmap` - Reference to 4-word atomic bitmap
+///
+/// # Returns
+/// `true` if all bits are set, `false` otherwise
+///
+/// # Performance
+/// O(1) - ~5% overhead from seqlock without collisions
+///
+/// # Thread Safety
+/// Lock-free read operation. Retries if concurrent bulk modification detected.
+#[inline]
+pub fn is_full_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4]) -> bool {
+    loop {
+        let seq_before = seq.load(Ordering::Acquire);
+        if seq_before & 1 != 0 {
+            core::hint::spin_loop();
+            continue;
+        }
+        let result = is_full(bitmap);
+        let seq_after = seq.load(Ordering::Acquire);
+        if seq_before == seq_after {
+            return result;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

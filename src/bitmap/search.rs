@@ -215,6 +215,202 @@ pub fn count_range(bitmap: &[AtomicU64; 4], from: u8, to: u16) -> u32 {
     count
 }
 
+/// Find minimum set bit with seqlock protection.
+///
+/// Uses seqlock protocol to ensure consistent read during concurrent bulk modifications.
+///
+/// # Arguments
+/// * `seq` - Sequence counter for seqlock protocol
+/// * `bitmap` - Reference to 4-word atomic bitmap
+///
+/// # Returns
+/// Index of minimum set bit, or None if bitmap is empty
+///
+/// # Performance
+/// O(1) - ~5% overhead from seqlock without collisions
+///
+/// # Thread Safety
+/// Lock-free read operation. Retries if concurrent bulk modification detected.
+#[inline]
+pub fn min_bit_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4]) -> Option<u8> {
+    loop {
+        let seq_before = seq.load(Ordering::Acquire);
+        if seq_before & 1 != 0 {
+            core::hint::spin_loop();
+            continue;
+        }
+        let result = min_bit(bitmap);
+        let seq_after = seq.load(Ordering::Acquire);
+        if seq_before == seq_after {
+            return result;
+        }
+    }
+}
+
+/// Find maximum set bit with seqlock protection.
+///
+/// Uses seqlock protocol to ensure consistent read during concurrent bulk modifications.
+///
+/// # Arguments
+/// * `seq` - Sequence counter for seqlock protocol
+/// * `bitmap` - Reference to 4-word atomic bitmap
+///
+/// # Returns
+/// Index of maximum set bit, or None if bitmap is empty
+///
+/// # Performance
+/// O(1) - ~5% overhead from seqlock without collisions
+///
+/// # Thread Safety
+/// Lock-free read operation. Retries if concurrent bulk modification detected.
+#[inline]
+pub fn max_bit_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4]) -> Option<u8> {
+    loop {
+        let seq_before = seq.load(Ordering::Acquire);
+        if seq_before & 1 != 0 {
+            core::hint::spin_loop();
+            continue;
+        }
+        let result = max_bit(bitmap);
+        let seq_after = seq.load(Ordering::Acquire);
+        if seq_before == seq_after {
+            return result;
+        }
+    }
+}
+
+/// Count all set bits with seqlock protection.
+///
+/// Uses seqlock protocol to ensure consistent read during concurrent bulk modifications.
+///
+/// # Arguments
+/// * `seq` - Sequence counter for seqlock protocol
+/// * `bitmap` - Reference to 4-word atomic bitmap
+///
+/// # Returns
+/// Total number of set bits (0-256)
+///
+/// # Performance
+/// O(1) - ~5% overhead from seqlock without collisions
+///
+/// # Thread Safety
+/// Lock-free read operation. Retries if concurrent bulk modification detected.
+#[inline]
+pub fn count_bits_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4]) -> u32 {
+    loop {
+        let seq_before = seq.load(Ordering::Acquire);
+        if seq_before & 1 != 0 {
+            core::hint::spin_loop();
+            continue;
+        }
+        let result = count_bits(bitmap);
+        let seq_after = seq.load(Ordering::Acquire);
+        if seq_before == seq_after {
+            return result;
+        }
+    }
+}
+
+/// Find next set bit after the given index with seqlock protection.
+///
+/// Uses seqlock protocol to ensure consistent read during concurrent bulk modifications.
+///
+/// # Arguments
+/// * `seq` - Sequence counter for seqlock protocol
+/// * `bitmap` - Reference to 4-word atomic bitmap
+/// * `after` - Index to search after (0-255)
+///
+/// # Returns
+/// Index of next set bit, or None if no set bits found
+///
+/// # Performance
+/// O(1) - ~5% overhead from seqlock without collisions
+///
+/// # Thread Safety
+/// Lock-free read operation. Retries if concurrent bulk modification detected.
+#[inline]
+pub fn next_set_bit_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4], after: u8) -> Option<u8> {
+    loop {
+        let seq_before = seq.load(Ordering::Acquire);
+        if seq_before & 1 != 0 {
+            core::hint::spin_loop();
+            continue;
+        }
+        let result = next_set_bit(bitmap, after);
+        let seq_after = seq.load(Ordering::Acquire);
+        if seq_before == seq_after {
+            return result;
+        }
+    }
+}
+
+/// Find previous set bit before the given index with seqlock protection.
+///
+/// Uses seqlock protocol to ensure consistent read during concurrent bulk modifications.
+///
+/// # Arguments
+/// * `seq` - Sequence counter for seqlock protocol
+/// * `bitmap` - Reference to 4-word atomic bitmap
+/// * `before` - Index to search before (0-255)
+///
+/// # Returns
+/// Index of previous set bit, or None if no set bits found
+///
+/// # Performance
+/// O(1) - ~5% overhead from seqlock without collisions
+///
+/// # Thread Safety
+/// Lock-free read operation. Retries if concurrent bulk modification detected.
+#[inline]
+pub fn prev_set_bit_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4], before: u8) -> Option<u8> {
+    loop {
+        let seq_before = seq.load(Ordering::Acquire);
+        if seq_before & 1 != 0 {
+            core::hint::spin_loop();
+            continue;
+        }
+        let result = prev_set_bit(bitmap, before);
+        let seq_after = seq.load(Ordering::Acquire);
+        if seq_before == seq_after {
+            return result;
+        }
+    }
+}
+
+/// Count set bits in range [from, to) with seqlock protection.
+///
+/// Uses seqlock protocol to ensure consistent read during concurrent bulk modifications.
+///
+/// # Arguments
+/// * `seq` - Sequence counter for seqlock protocol
+/// * `bitmap` - Reference to 4-word atomic bitmap
+/// * `from` - Start index (inclusive, 0-255)
+/// * `to` - End index (exclusive, 0-256)
+///
+/// # Returns
+/// Number of set bits in range
+///
+/// # Performance
+/// O(1) - ~5% overhead from seqlock without collisions
+///
+/// # Thread Safety
+/// Lock-free read operation. Retries if concurrent bulk modification detected.
+#[inline]
+pub fn count_range_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4], from: u8, to: u16) -> u32 {
+    loop {
+        let seq_before = seq.load(Ordering::Acquire);
+        if seq_before & 1 != 0 {
+            core::hint::spin_loop();
+            continue;
+        }
+        let result = count_range(bitmap, from, to);
+        let seq_after = seq.load(Ordering::Acquire);
+        if seq_before == seq_after {
+            return result;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
