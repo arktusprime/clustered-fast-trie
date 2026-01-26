@@ -1,7 +1,7 @@
 //! Leaf node structure for storing actual keys.
 
+use crate::atomic::{AtomicU64, Ordering};
 use crate::constants::EMPTY;
-use core::sync::atomic::AtomicU64;
 
 /// Leaf node storing 256 keys via bitmap.
 ///
@@ -91,8 +91,6 @@ impl Leaf {
 
 impl Clone for Leaf {
     fn clone(&self) -> Self {
-        use core::sync::atomic::Ordering;
-
         Leaf {
             bitmap: [
                 AtomicU64::new(self.bitmap[0].load(Ordering::Relaxed)),
@@ -113,8 +111,6 @@ mod tests {
 
     #[test]
     fn test_new_leaf() {
-        use core::sync::atomic::Ordering;
-
         let prefix = 0x12345600u64;
         let leaf = Leaf::new(prefix);
 
@@ -145,8 +141,6 @@ mod tests {
 
     #[test]
     fn test_clone() {
-        use core::sync::atomic::Ordering;
-
         let mut leaf = Leaf::new(0x12345600);
         leaf.bitmap[0].store(0xFF, Ordering::Relaxed);
         leaf.next = 42;

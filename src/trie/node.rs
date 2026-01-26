@@ -1,7 +1,7 @@
 //! Internal node structure for 256-way branching trie.
 
+use crate::atomic::{AtomicU64, Ordering};
 use crate::constants::EMPTY;
-use core::sync::atomic::AtomicU64;
 
 /// Internal node with 256-way branching.
 ///
@@ -87,8 +87,6 @@ impl Default for Node {
 
 impl Clone for Node {
     fn clone(&self) -> Self {
-        use core::sync::atomic::Ordering;
-
         Node {
             seq: AtomicU64::new(self.seq.load(Ordering::Relaxed)),
             bitmap: [
@@ -109,7 +107,6 @@ mod tests {
 
     #[test]
     fn test_new_node() {
-        use core::sync::atomic::Ordering;
         let node = Node::new();
 
         // Seq should be 0 (even = stable)
@@ -142,7 +139,6 @@ mod tests {
 
     #[test]
     fn test_default() {
-        use core::sync::atomic::Ordering;
         let node = Node::default();
         assert_eq!(node.seq.load(Ordering::Relaxed), 0);
         assert_eq!(node.bitmap[0].load(Ordering::Relaxed), 0);
