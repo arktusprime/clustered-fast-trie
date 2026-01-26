@@ -258,6 +258,47 @@ impl ArenaAllocator {
             .get_mut(arena_idx as usize)
             .and_then(|opt| opt.as_mut())
     }
+
+    /// Allocate node and leaf arenas for a segment if not already allocated.
+    ///
+    /// Implements lazy allocation - arenas are created only when first needed.
+    /// This method ensures both node and leaf arenas exist for the given segment.
+    ///
+    /// # Arguments
+    /// * `segment_id` - Permanent segment identifier (perm_key)
+    ///
+    /// # Returns
+    /// Result<(), &'static str> - Ok if successful, Err with message if failed
+    ///
+    /// # Performance
+    /// O(1) - direct Vec indexing and arena creation
+    ///
+    /// # Memory Usage
+    /// Allocates empty arenas (~24 bytes each) that grow as nodes/leaves are added
+    pub fn allocate_arena(&mut self, segment_id: SegmentId) -> Result<(), &'static str> {
+        // Get segment metadata to find arena index
+        let segment_meta = self.get_segment_meta(segment_id)
+            .ok_or("Segment not found")?;
+        
+        let arena_idx = segment_meta.cache_key as usize;
+        
+        // Ensure vectors are large enough
+        if arena_idx >= self.node_arenas.len() {
+            return Err("Arena index out of bounds");
+        }
+        
+        // Allocate node arena if not exists
+        if self.node_arenas[arena_idx].is_none() {
+            self.node_arenas[arena_idx] = Some(Arena::new());
+        }
+        
+        // Allocate leaf arena if not exists
+        if self.leaf_arenas[arena_idx].is_none() {
+            self.leaf_arenas[arena_idx] = Some(Arena::new());
+        }
+        
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -528,5 +569,38 @@ mod tests {
         // Verify changes
         let arena = allocator.get_leaf_arena(arena_idx).unwrap();
         assert_eq!(arena.len(), 1); // One leaf added
+    }
+
+    #[test]
+    fn test_allocate_arena() {
+        let mut allocator = ArenaAllocator::new();
+        
+        // Test non-existent segment
+        assert!(allocator.allocate_arena(999).is_err());
+        
+        // Create segment
+        let segment_id = allocator.create_segment(KeyRange { start: 5000, size: 1000 }, 0);
+        let meta = allocator.get_segment_meta(segment_id).unwrap();
+        let arena_idx = meta.cache_key;
+        
+        // Initially arenas should not be allocated
+        assert!(allocator.get_node_arena(arena_idx).is_none());
+        assert!(allocator.get_leaf_arena(arena_idx).is_none());
+        
+        // Allocate arenas
+        assert!(allocator.allocate_arena(segment_id).is_ok());
+        
+        // Now arenas should exist
+        assert!(allocator.get_node_arena(arena_idx).is_some());
+        assert!(allocator.get_leaf_arena(arena_idx).is_some());
+        
+        // Both arenas should be empty initially
+        assert_eq!(allocator.get_node_arena(arena_idx).unwrap().len(), 0);
+        assert_eq!(allocator.get_leaf_arena(arena_idx).unwrap().len(), 0);
+        
+        // Calling allocate_arena again should be safe (idempotent)
+        assert!(allocator.allocate_arena(segment_id).is_ok());
+        assert!(allocator.get_node_arena(arena_idx).is_some());
+        assert!(allocator.get_leaf_arena(arena_idx).is_some());
     }
 }
