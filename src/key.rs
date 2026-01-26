@@ -56,6 +56,17 @@ pub trait TrieKey: Copy + Eq + Sized {
     /// # Performance
     /// O(1) - zero-cost for u128, single cast for u32/u64
     fn to_u128(self) -> u128;
+
+    /// Get maximum value for this key type.
+    ///
+    /// Used for key range calculations and segment sizing.
+    ///
+    /// # Returns
+    /// Maximum possible value for this key type
+    ///
+    /// # Performance
+    /// O(1) - compile-time constant
+    fn max_value() -> u128;
 }
 
 impl TrieKey for u32 {
@@ -81,6 +92,11 @@ impl TrieKey for u32 {
     #[inline(always)]
     fn to_u128(self) -> u128 {
         self as u128
+    }
+
+    #[inline(always)]
+    fn max_value() -> u128 {
+        u32::MAX as u128
     }
 }
 
@@ -108,6 +124,11 @@ impl TrieKey for u64 {
     fn to_u128(self) -> u128 {
         self as u128
     }
+
+    #[inline(always)]
+    fn max_value() -> u128 {
+        u64::MAX as u128
+    }
 }
 
 impl TrieKey for u128 {
@@ -133,6 +154,11 @@ impl TrieKey for u128 {
     #[inline(always)]
     fn to_u128(self) -> u128 {
         self
+    }
+
+    #[inline(always)]
+    fn max_value() -> u128 {
+        u128::MAX
     }
 }
 
