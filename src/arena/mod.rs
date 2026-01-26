@@ -5,6 +5,7 @@
 
 pub mod allocator;
 pub mod arena;
+pub mod cache;
 pub mod defrag;
 pub mod free_list;
 pub mod handle;
@@ -14,5 +15,6 @@ pub mod segment;
 // Re-exports
 pub use allocator::ArenaAllocator;
 pub use arena::Arena;
+pub use cache::SegmentCache;
 pub use handle::SegmentHandle;
 pub use segment::{KeyRange, SegmentId, SegmentMeta};
