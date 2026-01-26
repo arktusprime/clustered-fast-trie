@@ -25,3 +25,4 @@ mod key;
 mod trie;
 
 pub use key::TrieKey;
+pub use trie::Trie;
