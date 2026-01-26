@@ -10,6 +10,10 @@ readme = "README.md"
 keywords = ["ordered-set", "integer-set", "trie", "no-std", "range-query"]
 categories = ["data-structures", "no-std", "algorithms"]
 
+[features]
+default = []
+single-threaded = []
+
 [dependencies]
 
 [dev-dependencies]
