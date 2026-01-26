@@ -203,7 +203,7 @@ mod tests {
         assert_eq!(meta.arena_index(1u128 << 32), 1);
 
         // Keys in higher arenas
-        assert_eq!(meta.arena_index(1u128 << 64), 1u32 << 32);
+        assert_eq!(meta.arena_index((1u128 << 64) - 1), u32::MAX);
     }
 
     #[test]
@@ -289,4 +289,3 @@ mod tests {
         assert!(size_of::<SegmentMeta>() <= 32);
     }
 }
-
