@@ -26,6 +26,7 @@ use crate::constants::EMPTY;
 /// # Concurrency
 /// - Seq counter for seqlock protocol (bulk operations)
 /// - Even = stable, odd = writer active
+#[derive(Debug)]
 #[repr(C, align(64))]
 pub struct Node {
     /// Sequence counter for seqlock protocol.

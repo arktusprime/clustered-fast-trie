@@ -19,6 +19,7 @@ use crate::trie::{Node, Leaf};
 /// - Lazy allocation: segments, arenas, nodes/leaves created on-demand
 /// - Per-segment isolation: each segment has own arena range
 /// - Cache locality: related data stored in same arena
+#[derive(Debug)]
 pub struct ArenaAllocator {
     /// Segment metadata indexed by permanent key (perm_key).
     /// None = segment not created, Some = segment exists.

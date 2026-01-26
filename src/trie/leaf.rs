@@ -31,6 +31,7 @@ use crate::constants::EMPTY;
 /// - Bitmap uses AtomicU64 for lock-free operations
 /// - Prefix is immutable after creation
 /// - Next/prev updated atomically during list operations
+#[derive(Debug)]
 #[repr(C)]
 pub struct Leaf {
     /// Bitmap indicating which keys exist (256 bits).

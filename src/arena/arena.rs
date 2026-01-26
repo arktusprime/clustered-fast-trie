@@ -22,6 +22,7 @@ use crate::trie::{Leaf, Node};
 /// - Allocation: O(1) amortized
 /// - Access: O(1) by index
 /// - Cache-friendly: sequential layout
+#[derive(Debug)]
 pub struct Arena<T> {
     /// Storage for elements.
     ///

@@ -15,6 +15,7 @@
 /// cargo build                          # Multi-threaded (default)
 /// cargo build --features single-threaded  # Single-threaded (faster)
 /// ```
+#[derive(Debug)]
 pub struct AtomicU64 {
     #[cfg(feature = "single-threaded")]
     inner: core::cell::Cell<u64>,
