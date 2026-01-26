@@ -1,6 +1,6 @@
 //! Check operations for validating bitmap state.
 
-use core::sync::atomic::{AtomicU64, Ordering};
+use crate::atomic::{AtomicU64, Ordering};
 
 /// Check if all bits in range [from, to) are set.
 ///

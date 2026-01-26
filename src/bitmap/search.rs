@@ -1,7 +1,7 @@
 //! Search operations for finding set bits in bitmap.
 
+use crate::atomic::{AtomicU64, Ordering};
 use crate::bitmap::{leading_zeros, popcount, trailing_zeros};
-use core::sync::atomic::{AtomicU64, Ordering};
 
 /// Find minimum set bit.
 ///

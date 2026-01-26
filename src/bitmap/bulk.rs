@@ -1,6 +1,6 @@
 //! Bulk operations for setting/clearing multiple bits efficiently.
 
-use core::sync::atomic::{AtomicU64, Ordering};
+use crate::atomic::{AtomicU64, Ordering};
 
 /// Set a range of bits [from, to) in the bitmap.
 ///
@@ -224,9 +224,11 @@ pub fn clear_all(bitmap: &[AtomicU64; 4]) {
 #[inline]
 pub fn set_range_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4], from: u8, to: u16) {
     seq.fetch_add(1, Ordering::Release); // Make odd
-    core::sync::atomic::fence(Ordering::Release);
+    #[cfg(not(feature = "single-threaded"))]
+    core::sync::atomic::fence(core::sync::atomic::Ordering::Release);
     set_range(bitmap, from, to);
-    core::sync::atomic::fence(Ordering::Release);
+    #[cfg(not(feature = "single-threaded"))]
+    core::sync::atomic::fence(core::sync::atomic::Ordering::Release);
     seq.fetch_add(1, Ordering::Release); // Make even
 }
 
@@ -248,9 +250,11 @@ pub fn set_range_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4], from: u8, to:
 #[inline]
 pub fn clear_range_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4], from: u8, to: u16) {
     seq.fetch_add(1, Ordering::Release); // Make odd
-    core::sync::atomic::fence(Ordering::Release);
+    #[cfg(not(feature = "single-threaded"))]
+    core::sync::atomic::fence(core::sync::atomic::Ordering::Release);
     clear_range(bitmap, from, to);
-    core::sync::atomic::fence(Ordering::Release);
+    #[cfg(not(feature = "single-threaded"))]
+    core::sync::atomic::fence(core::sync::atomic::Ordering::Release);
     seq.fetch_add(1, Ordering::Release); // Make even
 }
 
@@ -271,9 +275,11 @@ pub fn clear_range_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4], from: u8, t
 #[inline]
 pub fn set_bits_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4], indices: &[u8]) {
     seq.fetch_add(1, Ordering::Release); // Make odd
-    core::sync::atomic::fence(Ordering::Release);
+    #[cfg(not(feature = "single-threaded"))]
+    core::sync::atomic::fence(core::sync::atomic::Ordering::Release);
     set_bits(bitmap, indices);
-    core::sync::atomic::fence(Ordering::Release);
+    #[cfg(not(feature = "single-threaded"))]
+    core::sync::atomic::fence(core::sync::atomic::Ordering::Release);
     seq.fetch_add(1, Ordering::Release); // Make even
 }
 
@@ -294,9 +300,11 @@ pub fn set_bits_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4], indices: &[u8]
 #[inline]
 pub fn clear_bits_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4], indices: &[u8]) {
     seq.fetch_add(1, Ordering::Release); // Make odd
-    core::sync::atomic::fence(Ordering::Release);
+    #[cfg(not(feature = "single-threaded"))]
+    core::sync::atomic::fence(core::sync::atomic::Ordering::Release);
     clear_bits(bitmap, indices);
-    core::sync::atomic::fence(Ordering::Release);
+    #[cfg(not(feature = "single-threaded"))]
+    core::sync::atomic::fence(core::sync::atomic::Ordering::Release);
     seq.fetch_add(1, Ordering::Release); // Make even
 }
 

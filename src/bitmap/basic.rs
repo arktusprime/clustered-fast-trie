@@ -1,6 +1,6 @@
 //! Basic single-bit operations with atomic support.
 
-use core::sync::atomic::{AtomicU64, Ordering};
+use crate::atomic::{AtomicU64, Ordering};
 
 /// Set a bit in the bitmap at the given index (atomic operation).
 ///
