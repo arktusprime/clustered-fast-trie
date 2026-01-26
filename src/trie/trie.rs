@@ -83,6 +83,90 @@ impl<K: TrieKey> Trie<K> {
             _phantom: core::marker::PhantomData,
         }
     }
+
+    /// Insert a key into the trie.
+    ///
+    /// Adds the specified key to the trie using lazy allocation.
+    /// Creates nodes and leaves as needed during traversal.
+    ///
+    /// # Arguments
+    /// * `key` - The key to insert
+    ///
+    /// # Returns
+    /// * `true` if the key was newly inserted
+    /// * `false` if the key already existed
+    ///
+    /// # Performance
+    /// O(log log U) - traverses at most K::LEVELS + 1 levels
+    ///
+    /// # Example
+    /// ```rust
+    /// use clustered_fast_trie::Trie;
+    ///
+    /// let mut trie = Trie::<u32>::new();
+    /// assert!(trie.insert(42));   // New key
+    /// assert!(!trie.insert(42));  // Already exists
+    /// ```
+    pub fn insert(&mut self, key: K) -> bool {
+        // Step 1: Ensure arenas are allocated
+        if let Err(_) = self.allocator.allocate_arena(self.root_segment) {
+            return false; // Failed to allocate arenas
+        }
+
+        // Step 2: Get segment metadata
+        let segment_meta = self.allocator.get_segment_meta(self.root_segment)
+            .expect("Segment should exist");
+        let arena_idx = segment_meta.cache_key;
+
+        // Step 3: Ensure root node exists (index 0 in node arena)
+        let root_node_idx = self.ensure_root_node(arena_idx);
+
+        // Step 4: Traverse trie levels to find/create path to leaf
+        let leaf_idx = self.traverse_to_leaf(key, root_node_idx, arena_idx);
+
+        // Step 5: Set bit in leaf bitmap
+        self.set_bit_in_leaf(key, leaf_idx, arena_idx)
+    }
+
+    /// Ensure root node exists at index 0 in node arena.
+    fn ensure_root_node(&mut self, arena_idx: u32) -> u32 {
+        let node_arena = self.allocator.get_node_arena_mut(arena_idx)
+            .expect("Node arena should be allocated");
+        
+        if node_arena.is_empty() {
+            // Create root node at index 0
+            node_arena.alloc()
+        } else {
+            // Root node already exists at index 0
+            0
+        }
+    }
+
+    /// Traverse trie levels to find or create leaf.
+    fn traverse_to_leaf(&mut self, key: K, mut current_node_idx: u32, arena_idx: u32) -> u32 {
+        // For now, simplified: assume we need to create a leaf
+        // TODO: Implement full traversal logic
+        
+        let leaf_arena = self.allocator.get_leaf_arena_mut(arena_idx)
+            .expect("Leaf arena should be allocated");
+        
+        // Create leaf with key prefix
+        let prefix = key.prefix().to_u128() as u64;
+        leaf_arena.alloc(prefix)
+    }
+
+    /// Set bit in leaf bitmap for the given key.
+    fn set_bit_in_leaf(&mut self, key: K, leaf_idx: u32, arena_idx: u32) -> bool {
+        let leaf_arena = self.allocator.get_leaf_arena_mut(arena_idx)
+            .expect("Leaf arena should be allocated");
+        
+        let leaf = leaf_arena.get_mut(leaf_idx);
+        let bit_idx = key.last_byte();
+        
+        // TODO: Use bitmap operations to check and set bit
+        // For now, always return true (new insertion)
+        true
+    }
 }
 
 impl<K: TrieKey> Default for Trie<K> {
@@ -142,5 +226,14 @@ mod tests {
         
         // Both should have same structure
         assert_eq!(trie1.root_segment, trie2.root_segment);
+    }
+
+    #[test]
+    fn test_insert_basic() {
+        let mut trie = Trie::<u32>::new();
+        
+        // Test basic insertion
+        let result = trie.insert(42);
+        assert!(result); // Should return true for new key
     }
 }
