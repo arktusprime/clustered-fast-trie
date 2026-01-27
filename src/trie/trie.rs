@@ -43,6 +43,15 @@ pub struct Trie<K: TrieKey> {
     /// Root segment ID for single-tenant mode
     root_segment: SegmentId,
 
+    /// Number of keys stored in the trie
+    len: usize,
+
+    /// Cached minimum key for O(1) access
+    min_key: Option<K>,
+
+    /// Cached maximum key for O(1) access
+    max_key: Option<K>,
+
     /// Phantom data to associate with key type
     _phantom: core::marker::PhantomData<K>,
 }
@@ -80,6 +89,9 @@ impl<K: TrieKey> Trie<K> {
         Self {
             allocator,
             root_segment,
+            len: 0,
+            min_key: None,
+            max_key: None,
             _phantom: core::marker::PhantomData,
         }
     }
