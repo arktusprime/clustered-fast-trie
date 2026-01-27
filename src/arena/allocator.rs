@@ -14,11 +14,14 @@ use alloc::vec::Vec;
 /// - segment_caches: Vec<Option<SegmentCache>> - per-segment hot path caches
 /// - node_arenas: Vec<Option<Arena<Node>>> - internal node storage
 /// - leaf_arenas: Vec<Option<Arena<Leaf>>> - leaf node storage
+/// - node_free_lists: Vec<Vec<u32>> - free node indices for reuse
+/// - leaf_free_lists: Vec<Vec<u32>> - free leaf indices for reuse
 ///
 /// # Memory Layout
 /// - Lazy allocation: segments, arenas, nodes/leaves created on-demand
 /// - Per-segment isolation: each segment has own arena range
 /// - Cache locality: related data stored in same arena
+/// - Free list reuse: deleted nodes/leaves are recycled via free lists
 #[derive(Debug)]
 pub struct ArenaAllocator {
     /// Segment metadata indexed by permanent key (perm_key).
@@ -36,25 +39,37 @@ pub struct ArenaAllocator {
     /// Leaf node arenas for bitmap storage.
     /// Indexed by cache_key from SegmentMeta.
     leaf_arenas: Vec<Option<Arena<Leaf>>>,
+
+    /// Free lists for node reuse (parallel to node_arenas).
+    /// Each Vec<u32> contains indices of freed nodes in corresponding arena.
+    /// Indexed by cache_key from SegmentMeta.
+    node_free_lists: Vec<Vec<u32>>,
+
+    /// Free lists for leaf reuse (parallel to leaf_arenas).
+    /// Each Vec<u32> contains indices of freed leaves in corresponding arena.
+    /// Indexed by cache_key from SegmentMeta.
+    leaf_free_lists: Vec<Vec<u32>>,
 }
 
 impl ArenaAllocator {
     /// Create a new empty arena allocator.
     ///
-    /// Initializes all storage vectors as empty. Segments, arenas, and caches
-    /// are allocated lazily on first use for optimal memory efficiency.
+    /// Initializes all storage vectors as empty. Segments, arenas, caches,
+    /// and free lists are allocated lazily on first use for optimal memory efficiency.
     ///
     /// # Performance
     /// O(1) - creates empty vectors with zero allocations
     ///
     /// # Memory Usage
-    /// ~96 bytes (4 empty Vec headers × 24 bytes each)
+    /// ~144 bytes (6 empty Vec headers × 24 bytes each)
     pub fn new() -> Self {
         Self {
             segments: Vec::new(),
             segment_caches: Vec::new(),
             node_arenas: Vec::new(),
             leaf_arenas: Vec::new(),
+            node_free_lists: Vec::new(),
+            leaf_free_lists: Vec::new(),
         }
     }
 
@@ -104,6 +119,10 @@ impl ArenaAllocator {
         // Reserve arena slots (but don't allocate yet - lazy allocation)
         self.node_arenas.push(None);
         self.leaf_arenas.push(None);
+
+        // Reserve free list slots (empty initially)
+        self.node_free_lists.push(Vec::new());
+        self.leaf_free_lists.push(Vec::new());
 
         segment_id
     }
