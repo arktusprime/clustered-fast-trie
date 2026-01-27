@@ -186,6 +186,63 @@ impl<K: TrieKey> Trie<K> {
         self.check_bit_in_leaf(key, 0, arena_idx)
     }
 
+    /// Remove a key from the trie.
+    ///
+    /// Removes the specified key from the trie if it exists.
+    /// Uses atomic clear operation for thread safety.
+    ///
+    /// # Arguments
+    /// * `key` - The key to remove
+    ///
+    /// # Returns
+    /// * `true` if the key was removed (existed before)
+    /// * `false` if the key didn't exist
+    ///
+    /// # Performance
+    /// O(log log U) - traverses at most K::LEVELS + 1 levels
+    ///
+    /// # Example
+    /// ```rust
+    /// use clustered_fast_trie::Trie;
+    ///
+    /// let mut trie = Trie::<u32>::new();
+    /// assert!(!trie.remove(42));  // Key doesn't exist
+    /// trie.insert(42);
+    /// assert!(trie.remove(42));   // Key removed
+    /// assert!(!trie.remove(42));  // Key no longer exists
+    /// ```
+    pub fn remove(&mut self, key: K) -> bool {
+        // Step 1: Check if arenas are allocated
+        let segment_meta = match self.allocator.get_segment_meta(self.root_segment) {
+            Some(meta) => meta,
+            None => return false, // Segment doesn't exist
+        };
+        let arena_idx = segment_meta.cache_key;
+
+        // Step 2: Check if node arena exists and has root node
+        let node_arena = match self.allocator.get_node_arena(arena_idx) {
+            Some(arena) => arena,
+            None => return false, // Node arena not allocated
+        };
+
+        if node_arena.is_empty() {
+            return false; // No root node exists
+        }
+
+        // Step 3: Find leaf (simplified for now - assume leaf exists at index 0)
+        let leaf_arena = match self.allocator.get_leaf_arena_mut(arena_idx) {
+            Some(arena) => arena,
+            None => return false, // Leaf arena not allocated
+        };
+
+        if leaf_arena.is_empty() {
+            return false; // No leaves exist
+        }
+
+        // Step 4: Clear bit in leaf bitmap
+        self.clear_bit_in_leaf(key, 0, arena_idx)
+    }
+
     /// Ensure root node exists at index 0 in node arena.
     fn ensure_root_node(&mut self, arena_idx: u32) -> u32 {
         let node_arena = self
@@ -247,6 +304,27 @@ impl<K: TrieKey> Trie<K> {
 
         // Use atomic read: check if bit is set
         is_set(&leaf.bitmap, bit_idx)
+    }
+
+    /// Clear bit in leaf bitmap for the given key.
+    fn clear_bit_in_leaf(&mut self, key: K, leaf_idx: u32, arena_idx: u32) -> bool {
+        use crate::bitmap::{is_set, clear_bit};
+
+        let leaf_arena = self
+            .allocator
+            .get_leaf_arena_mut(arena_idx)
+            .expect("Leaf arena should be allocated");
+
+        let leaf = leaf_arena.get_mut(leaf_idx);
+        let bit_idx = key.last_byte();
+
+        // Check if bit was set before clearing
+        let was_set = is_set(&leaf.bitmap, bit_idx);
+        if was_set {
+            clear_bit(&leaf.bitmap, bit_idx);
+        }
+        
+        was_set
     }
 }
 
@@ -333,5 +411,26 @@ mod tests {
 
         // Other key should not exist
         assert!(!trie.contains(43));
+    }
+
+    #[test]
+    fn test_remove_basic() {
+        let mut trie = Trie::<u32>::new();
+        
+        // Key doesn't exist initially - remove should return false
+        assert!(!trie.remove(42));
+        
+        // Insert key
+        trie.insert(42);
+        assert!(trie.contains(42));
+        
+        // Remove key - should return true (was removed)
+        assert!(trie.remove(42));
+        
+        // Key should no longer exist
+        assert!(!trie.contains(42));
+        
+        // Remove again - should return false (doesn't exist)
+        assert!(!trie.remove(42));
     }
 }
