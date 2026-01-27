@@ -67,6 +67,42 @@ impl Node {
     pub fn max_child(&self) -> Option<u8> {
         bitmap::max_bit(&self.bitmap)
     }
+
+    /// Find successor child index (first set bit > idx).
+    ///
+    /// Searches for the next child after the given index.
+    /// Used for trie traversal in successor operations.
+    ///
+    /// # Arguments
+    /// * `idx` - Starting index (exclusive)
+    ///
+    /// # Returns
+    /// Next child index after idx (0-255), or None if no successor exists
+    ///
+    /// # Performance
+    /// O(1) - uses TZCNT instruction on masked bitmap
+    #[inline]
+    pub fn successor_child(&self, idx: u8) -> Option<u8> {
+        bitmap::next_set_bit(&self.bitmap, idx)
+    }
+
+    /// Find predecessor child index (last set bit < idx).
+    ///
+    /// Searches for the previous child before the given index.
+    /// Used for trie traversal in predecessor operations.
+    ///
+    /// # Arguments
+    /// * `idx` - Starting index (exclusive)
+    ///
+    /// # Returns
+    /// Previous child index before idx (0-255), or None if no predecessor exists
+    ///
+    /// # Performance
+    /// O(1) - uses LZCNT instruction on masked bitmap
+    #[inline]
+    pub fn predecessor_child(&self, idx: u8) -> Option<u8> {
+        bitmap::prev_set_bit(&self.bitmap, idx)
+    }
 }
 
 #[cfg(test)]

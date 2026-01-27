@@ -14,4 +14,4 @@ pub use basic::{clear_bit, is_set, set_bit, test_and_set_bit};
 pub use bulk::{set_bits, set_range};
 pub use check::{is_empty, is_full};
 pub use intrinsics::{leading_zeros, popcount, trailing_zeros};
-pub use search::{count_bits, max_bit, min_bit};
+pub use search::{count_bits, max_bit, min_bit, next_set_bit, prev_set_bit};
