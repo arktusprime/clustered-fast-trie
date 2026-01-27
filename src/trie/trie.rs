@@ -806,6 +806,86 @@ impl<K: TrieKey> Trie<K> {
         was_set
     }
 
+    /// Find minimum leaf starting from a node at given level.
+    ///
+    /// Descends from the specified node, always taking the minimum child
+    /// at each level until reaching a leaf. Used for finding the next leaf
+    /// in sorted order when building the linked list.
+    ///
+    /// # Arguments
+    /// * `node_idx` - Starting node index
+    /// * `start_level` - Level of the starting node (0..K::LEVELS-1)
+    /// * `arena_idx` - Arena index for storage
+    ///
+    /// # Returns
+    /// Index of the minimum leaf reachable from this node, or EMPTY if none exists
+    ///
+    /// # Performance
+    /// O(K::LEVELS - start_level) = O(log log U)
+    fn find_min_leaf_from(&self, mut node_idx: u32, start_level: usize, arena_idx: u64) -> u32 {
+        let node_arena = match self.allocator.get_node_arena(arena_idx) {
+            Some(arena) => arena,
+            None => return crate::constants::EMPTY,
+        };
+
+        // Traverse internal levels from start_level to K::LEVELS-1
+        for _level in start_level..(K::LEVELS - 1) {
+            let node = node_arena.get(node_idx);
+            let min_byte = match node.min_child() {
+                Some(b) => b,
+                None => return crate::constants::EMPTY,
+            };
+            node_idx = node.get_child(min_byte);
+        }
+
+        // Final level: get minimum leaf
+        let final_node = node_arena.get(node_idx);
+        match final_node.min_child() {
+            Some(min_byte) => final_node.get_child(min_byte),
+            None => crate::constants::EMPTY,
+        }
+    }
+
+    /// Find maximum leaf starting from a node at given level.
+    ///
+    /// Descends from the specified node, always taking the maximum child
+    /// at each level until reaching a leaf. Used for finding the previous leaf
+    /// in sorted order when building the linked list.
+    ///
+    /// # Arguments
+    /// * `node_idx` - Starting node index
+    /// * `start_level` - Level of the starting node (0..K::LEVELS-1)
+    /// * `arena_idx` - Arena index for storage
+    ///
+    /// # Returns
+    /// Index of the maximum leaf reachable from this node, or EMPTY if none exists
+    ///
+    /// # Performance
+    /// O(K::LEVELS - start_level) = O(log log U)
+    fn find_max_leaf_from(&self, mut node_idx: u32, start_level: usize, arena_idx: u64) -> u32 {
+        let node_arena = match self.allocator.get_node_arena(arena_idx) {
+            Some(arena) => arena,
+            None => return crate::constants::EMPTY,
+        };
+
+        // Traverse internal levels from start_level to K::LEVELS-1
+        for _level in start_level..(K::LEVELS - 1) {
+            let node = node_arena.get(node_idx);
+            let max_byte = match node.max_child() {
+                Some(b) => b,
+                None => return crate::constants::EMPTY,
+            };
+            node_idx = node.get_child(max_byte);
+        }
+
+        // Final level: get maximum leaf
+        let final_node = node_arena.get(node_idx);
+        match final_node.max_child() {
+            Some(max_byte) => final_node.get_child(max_byte),
+            None => crate::constants::EMPTY,
+        }
+    }
+
     /// Clean up empty nodes along the path from leaf to root.
     ///
     /// Traverses the path bottom-up, checking each node for emptiness.
