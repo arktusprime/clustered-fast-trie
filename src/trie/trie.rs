@@ -452,4 +452,55 @@ mod tests {
         // Remove again - should return false (doesn't exist)
         assert!(!trie.remove(42));
     }
+
+    #[test]
+    fn test_integration_operations() {
+        let mut trie = Trie::<u32>::new();
+        
+        // Test with multiple keys
+        let keys = [10, 20, 30, 40, 50];
+        
+        // Initially all keys should not exist
+        for &key in &keys {
+            assert!(!trie.contains(key));
+            assert!(!trie.remove(key)); // Remove non-existent key
+        }
+        
+        // Insert all keys
+        for &key in &keys {
+            assert!(trie.insert(key)); // Should return true (new key)
+            assert!(trie.contains(key)); // Should exist after insert
+        }
+        
+        // Try to insert duplicates
+        for &key in &keys {
+            assert!(!trie.insert(key)); // Should return false (already exists)
+            assert!(trie.contains(key)); // Should still exist
+        }
+        
+        // Remove some keys
+        assert!(trie.remove(20)); // Remove existing key
+        assert!(!trie.contains(20)); // Should not exist after remove
+        assert!(!trie.remove(20)); // Remove again - should return false
+        
+        assert!(trie.remove(40)); // Remove another key
+        assert!(!trie.contains(40)); // Should not exist after remove
+        
+        // Check remaining keys still exist
+        assert!(trie.contains(10));
+        assert!(trie.contains(30));
+        assert!(trie.contains(50));
+        
+        // Re-insert removed keys
+        assert!(trie.insert(20)); // Should return true (new key again)
+        assert!(trie.contains(20)); // Should exist after re-insert
+        
+        assert!(trie.insert(40)); // Re-insert another key
+        assert!(trie.contains(40)); // Should exist after re-insert
+        
+        // Final state - all keys should exist
+        for &key in &keys {
+            assert!(trie.contains(key));
+        }
+    }
 }
