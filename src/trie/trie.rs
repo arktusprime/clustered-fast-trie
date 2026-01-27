@@ -261,7 +261,7 @@ impl<K: TrieKey> Trie<K> {
 
     /// Traverse trie levels to find or create leaf.
     fn traverse_to_leaf(&mut self, key: K, _current_node_idx: u32, arena_idx: u32) -> u32 {
-        // For now, simplified: assume we need to create a leaf
+        // For now, simplified: check if leaf already exists at index 0
         // TODO: Implement full traversal logic
 
         let leaf_arena = self
@@ -269,9 +269,15 @@ impl<K: TrieKey> Trie<K> {
             .get_leaf_arena_mut(arena_idx)
             .expect("Leaf arena should be allocated");
 
-        // Create leaf with key prefix
-        let prefix = key.prefix().to_u128() as u64;
-        leaf_arena.alloc(prefix)
+        // Check if we already have a leaf at index 0
+        if !leaf_arena.is_empty() {
+            // Reuse existing leaf at index 0
+            0
+        } else {
+            // Create new leaf with key prefix
+            let prefix = key.prefix().to_u128() as u64;
+            leaf_arena.alloc(prefix)
+        }
     }
 
     /// Set bit in leaf bitmap for the given key.
@@ -308,7 +314,7 @@ impl<K: TrieKey> Trie<K> {
 
     /// Clear bit in leaf bitmap for the given key.
     fn clear_bit_in_leaf(&mut self, key: K, leaf_idx: u32, arena_idx: u32) -> bool {
-        use crate::bitmap::{is_set, clear_bit};
+        use crate::bitmap::{clear_bit, is_set};
 
         let leaf_arena = self
             .allocator
@@ -323,7 +329,7 @@ impl<K: TrieKey> Trie<K> {
         if was_set {
             clear_bit(&leaf.bitmap, bit_idx);
         }
-        
+
         was_set
     }
 }
@@ -397,6 +403,19 @@ mod tests {
     }
 
     #[test]
+    fn test_insert_duplicate() {
+        let mut trie = Trie::<u32>::new();
+
+        // First insertion should return true
+        let result1 = trie.insert(42);
+        assert!(result1); // Should return true for new key
+
+        // Second insertion should return false
+        let result2 = trie.insert(42);
+        assert!(!result2); // Should return false for existing key
+    }
+
+    #[test]
     fn test_contains_basic() {
         let mut trie = Trie::<u32>::new();
 
@@ -416,20 +435,20 @@ mod tests {
     #[test]
     fn test_remove_basic() {
         let mut trie = Trie::<u32>::new();
-        
+
         // Key doesn't exist initially - remove should return false
         assert!(!trie.remove(42));
-        
+
         // Insert key
         trie.insert(42);
         assert!(trie.contains(42));
-        
+
         // Remove key - should return true (was removed)
         assert!(trie.remove(42));
-        
+
         // Key should no longer exist
         assert!(!trie.contains(42));
-        
+
         // Remove again - should return false (doesn't exist)
         assert!(!trie.remove(42));
     }
