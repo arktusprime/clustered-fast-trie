@@ -483,6 +483,81 @@ impl<K: TrieKey> Trie<K> {
 
         was_set
     }
+
+    /// Clean up empty nodes along the path from leaf to root.
+    ///
+    /// Traverses the path bottom-up, checking each node for emptiness.
+    /// If a node is empty, removes the link from its parent and frees the node.
+    /// Stops at the first non-empty node (optimization: parent can't be empty if child isn't).
+    ///
+    /// # Algorithm
+    /// 1. Start from bottom of path (closest to leaf)
+    /// 2. For each node in path (bottom-up):
+    ///    - Check if node is empty via bitmap OR reduction
+    ///    - If NOT empty: stop (parent can't be empty)
+    ///    - If empty:
+    ///      - Get parent from path[i-1]
+    ///      - Remove link: parent.clear_child(byte)
+    ///      - Free node: allocator.free_node(arena_idx, node_idx)
+    /// 3. Never delete root node (index 0)
+    ///
+    /// # Arguments
+    /// * `path` - Array of (node_idx, byte) pairs from root to leaf
+    /// * `path_len` - Number of valid entries in path
+    /// * `arena_idx` - Arena index for node storage
+    ///
+    /// # Performance
+    /// O(K::LEVELS) worst case, but typically stops early at first non-empty node
+    fn cleanup_empty_nodes(&mut self, path: &[(u32, u8)], path_len: usize, arena_idx: u64) {
+        // Nothing to clean if path is empty
+        if path_len == 0 {
+            return;
+        }
+
+        // Traverse path bottom-up (from leaf towards root)
+        // Start at path_len-1 (last node before leaf)
+        for i in (0..path_len).rev() {
+            let (node_idx, byte) = path[i];
+
+            // Never delete root node (index 0)
+            if node_idx == 0 {
+                break;
+            }
+
+            // Check if node is empty
+            let is_empty = {
+                let node_arena = self
+                    .allocator
+                    .get_node_arena(arena_idx)
+                    .expect("Node arena should be allocated");
+                let node = node_arena.get(node_idx);
+                node.is_empty()
+            };
+
+            if !is_empty {
+                // Node is not empty - stop cleanup
+                // (if child is not empty, parent can't be empty either)
+                break;
+            }
+
+            // Node is empty - remove link from parent and free it
+            if i > 0 {
+                // Get parent from previous level in path
+                let (parent_idx, _) = path[i - 1];
+
+                // Remove link from parent
+                let node_arena = self
+                    .allocator
+                    .get_node_arena_mut(arena_idx)
+                    .expect("Node arena should be allocated");
+                let parent = node_arena.get_mut(parent_idx);
+                parent.clear_child(byte);
+            }
+
+            // Free the empty node
+            self.allocator.free_node(arena_idx, node_idx);
+        }
+    }
 }
 
 impl<K: TrieKey> Default for Trie<K> {
