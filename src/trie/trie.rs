@@ -172,18 +172,39 @@ impl<K: TrieKey> Trie<K> {
             return false; // No root node exists
         }
 
-        // Step 3: Find leaf (simplified for now - assume leaf exists at index 0)
+        // Step 3: Traverse trie levels to find leaf
+        let mut current_node_idx = 0; // Start at root
+
+        // Traverse internal levels (0..K::LEVELS-1)
+        for level in 0..(K::LEVELS - 1) {
+            let byte = key.byte_at(level);
+            let current_node = node_arena.get(current_node_idx);
+
+            if !current_node.has_child(byte) {
+                return false; // Path doesn't exist
+            }
+
+            current_node_idx = current_node.get_child(byte);
+        }
+
+        // Final level: check if leaf exists
+        let last_node_byte = key.byte_at(K::LEVELS - 1);
+        let final_node = node_arena.get(current_node_idx);
+
+        if !final_node.has_child(last_node_byte) {
+            return false; // Leaf doesn't exist
+        }
+
+        let leaf_idx = final_node.get_child(last_node_byte);
+
+        // Step 4: Check if leaf arena exists
         let leaf_arena = match self.allocator.get_leaf_arena(arena_idx) {
             Some(arena) => arena,
             None => return false, // Leaf arena not allocated
         };
 
-        if leaf_arena.is_empty() {
-            return false; // No leaves exist
-        }
-
-        // Step 4: Check bit in leaf bitmap
-        self.check_bit_in_leaf(key, 0, arena_idx)
+        // Step 5: Check bit in leaf bitmap
+        self.check_bit_in_leaf(key, leaf_idx, arena_idx)
     }
 
     /// Remove a key from the trie.
@@ -229,18 +250,39 @@ impl<K: TrieKey> Trie<K> {
             return false; // No root node exists
         }
 
-        // Step 3: Find leaf (simplified for now - assume leaf exists at index 0)
+        // Step 3: Traverse trie levels to find leaf
+        let mut current_node_idx = 0; // Start at root
+
+        // Traverse internal levels (0..K::LEVELS-1)
+        for level in 0..(K::LEVELS - 1) {
+            let byte = key.byte_at(level);
+            let current_node = node_arena.get(current_node_idx);
+
+            if !current_node.has_child(byte) {
+                return false; // Path doesn't exist
+            }
+
+            current_node_idx = current_node.get_child(byte);
+        }
+
+        // Final level: check if leaf exists
+        let last_node_byte = key.byte_at(K::LEVELS - 1);
+        let final_node = node_arena.get(current_node_idx);
+
+        if !final_node.has_child(last_node_byte) {
+            return false; // Leaf doesn't exist
+        }
+
+        let leaf_idx = final_node.get_child(last_node_byte);
+
+        // Step 4: Check if leaf arena exists
         let leaf_arena = match self.allocator.get_leaf_arena_mut(arena_idx) {
             Some(arena) => arena,
             None => return false, // Leaf arena not allocated
         };
 
-        if leaf_arena.is_empty() {
-            return false; // No leaves exist
-        }
-
-        // Step 4: Clear bit in leaf bitmap
-        self.clear_bit_in_leaf(key, 0, arena_idx)
+        // Step 5: Clear bit in leaf bitmap
+        self.clear_bit_in_leaf(key, leaf_idx, arena_idx)
     }
 
     /// Ensure root node exists at index 0 in node arena.
@@ -260,23 +302,102 @@ impl<K: TrieKey> Trie<K> {
     }
 
     /// Traverse trie levels to find or create leaf.
-    fn traverse_to_leaf(&mut self, key: K, _current_node_idx: u32, arena_idx: u64) -> u32 {
-        // For now, simplified: check if leaf already exists at index 0
-        // TODO: Implement full traversal logic
+    ///
+    /// Performs full traversal through internal Node structures at each level,
+    /// creating nodes as needed. On the final level, finds or creates a Leaf.
+    ///
+    /// # Algorithm
+    /// 1. Start at root node
+    /// 2. For each level (0..K::LEVELS-1):
+    ///    - Extract byte at current level from key
+    ///    - Check if child exists for this byte
+    ///    - If exists: move to that child node
+    ///    - If not: create new node and link it
+    /// 3. At final level (K::LEVELS-1):
+    ///    - Extract last byte before leaf level
+    ///    - Check if leaf exists for this byte
+    ///    - If exists: return leaf index
+    ///    - If not: create new leaf and link it
+    ///
+    /// # Performance
+    /// O(K::LEVELS) = O(log log U) where U is key space size
+    fn traverse_to_leaf(&mut self, key: K, mut current_node_idx: u32, arena_idx: u64) -> u32 {
+        // Traverse internal levels (0..K::LEVELS-1)
+        // Each level navigates through Node structures
+        for level in 0..(K::LEVELS - 1) {
+            let byte = key.byte_at(level);
 
-        let leaf_arena = self
-            .allocator
-            .get_leaf_arena_mut(arena_idx)
-            .expect("Leaf arena should be allocated");
+            // Check if child exists (read-only operation)
+            let child_idx = {
+                let node_arena = self
+                    .allocator
+                    .get_node_arena(arena_idx)
+                    .expect("Node arena should be allocated");
+                let current_node = node_arena.get(current_node_idx);
 
-        // Check if we already have a leaf at index 0
-        if !leaf_arena.is_empty() {
-            // Reuse existing leaf at index 0
-            0
+                if current_node.has_child(byte) {
+                    Some(current_node.get_child(byte))
+                } else {
+                    None
+                }
+            };
+
+            if let Some(idx) = child_idx {
+                // Child exists - move to it
+                current_node_idx = idx;
+            } else {
+                // Child doesn't exist - create new node and link it
+                let node_arena = self
+                    .allocator
+                    .get_node_arena_mut(arena_idx)
+                    .expect("Node arena should be allocated");
+
+                let new_node_idx = node_arena.alloc();
+                let current_node = node_arena.get_mut(current_node_idx);
+                current_node.set_child(byte, new_node_idx);
+                current_node_idx = new_node_idx;
+            }
+        }
+
+        // Final level (K::LEVELS - 1): transition from Node to Leaf
+        let last_node_byte = key.byte_at(K::LEVELS - 1);
+
+        // Check if leaf exists (read-only operation)
+        let leaf_idx = {
+            let node_arena = self
+                .allocator
+                .get_node_arena(arena_idx)
+                .expect("Node arena should be allocated");
+            let final_node = node_arena.get(current_node_idx);
+
+            if final_node.has_child(last_node_byte) {
+                Some(final_node.get_child(last_node_byte))
+            } else {
+                None
+            }
+        };
+
+        if let Some(idx) = leaf_idx {
+            // Leaf already exists
+            idx
         } else {
-            // Create new leaf with key prefix
+            // Create new leaf and link it
             let prefix = key.prefix().to_u128() as u64;
-            leaf_arena.alloc(prefix)
+
+            let leaf_arena = self
+                .allocator
+                .get_leaf_arena_mut(arena_idx)
+                .expect("Leaf arena should be allocated");
+            let new_leaf_idx = leaf_arena.alloc(prefix);
+
+            let node_arena = self
+                .allocator
+                .get_node_arena_mut(arena_idx)
+                .expect("Node arena should be allocated");
+            let final_node = node_arena.get_mut(current_node_idx);
+            final_node.set_child(last_node_byte, new_leaf_idx);
+
+            new_leaf_idx
         }
     }
 
