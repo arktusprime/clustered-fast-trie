@@ -335,6 +335,9 @@ impl<K: TrieKey> Trie<K> {
         };
 
         if is_leaf_empty {
+            // Unlink leaf from linked list
+            self.unlink_leaf(leaf_idx, arena_idx);
+
             // Remove link from parent node
             {
                 let node_arena = self
@@ -745,6 +748,9 @@ impl<K: TrieKey> Trie<K> {
                 .expect("Node arena should be allocated");
             let final_node = node_arena.get_mut(current_node_idx);
             final_node.set_child(last_node_byte, new_leaf_idx);
+
+            // Link new leaf into linked list
+            self.link_leaf(new_leaf_idx, &path, path_len, arena_idx);
 
             new_leaf_idx
         };
