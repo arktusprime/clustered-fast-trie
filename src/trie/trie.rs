@@ -376,8 +376,15 @@ impl<K: TrieKey> Trie<K> {
                     .expect("Node arena should be allocated");
 
                 let new_node_idx = node_arena.alloc();
+
+                // Set parent_idx for the new node
+                let new_node = node_arena.get_mut(new_node_idx);
+                new_node.parent_idx = current_node_idx;
+
+                // Link from parent to child
                 let current_node = node_arena.get_mut(current_node_idx);
                 current_node.set_child(byte, new_node_idx);
+
                 current_node_idx = new_node_idx;
             }
         }
