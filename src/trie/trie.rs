@@ -448,6 +448,193 @@ impl<K: TrieKey> Trie<K> {
         self.max_key
     }
 
+    /// Find successor (smallest key > given key).
+    ///
+    /// Returns the next key in sorted order after the given key.
+    /// Uses linked list of leaves for O(1) performance on clustered data.
+    ///
+    /// # Algorithm (from root)
+    /// 1. Quick checks using cached min/max
+    /// 2. Traverse to leaf containing key's prefix (save path)
+    /// 3. If path doesn't exist AND leaf empty → backtrack to find next leaf
+    /// 4. If path exists OR leaf not empty:
+    ///    - Search for next bit in current leaf bitmap (O(1))
+    ///    - If not found, follow leaf.next to next leaf (O(1))
+    ///    - Take minimum bit from next leaf
+    /// 5. Reconstruct key from prefix + bit
+    ///
+    /// # Arguments
+    /// * `key` - The key to find successor for
+    ///
+    /// # Returns
+    /// Next key after given key, or None if no successor exists
+    ///
+    /// # Performance
+    /// - O(1) for existing keys or keys in same/adjacent leaves
+    /// - O(log log U) for non-existing keys (requires backtracking)
+    ///
+    /// # Example
+    /// ```rust
+    /// use clustered_fast_trie::Trie;
+    ///
+    /// let mut trie = Trie::<u32>::new();
+    /// trie.insert(10);
+    /// trie.insert(20);
+    /// trie.insert(30);
+    ///
+    /// assert_eq!(trie.successor(10), Some(20));
+    /// assert_eq!(trie.successor(15), Some(20));
+    /// assert_eq!(trie.successor(30), None);
+    /// ```
+    pub fn successor(&self, key: K) -> Option<K> {
+        // Quick checks using cached min/max
+        if let Some(max) = self.max_key {
+            if key >= max {
+                return None; // No successor if key >= max
+            }
+        }
+        if let Some(min) = self.min_key {
+            if key < min {
+                return Some(min); // Min is successor if key < min
+            }
+        }
+
+        // Get segment metadata
+        let segment_meta = self.allocator.get_segment_meta(self.root_segment)?;
+        let arena_idx = segment_meta.cache_key;
+
+        // Get node arena
+        let node_arena = self.allocator.get_node_arena(arena_idx)?;
+        if node_arena.is_empty() {
+            return None;
+        }
+
+        // Traverse to leaf containing key's prefix (save path for backtracking)
+        let mut path: [(u32, u8); 16] = [(0, 0); 16];
+        let mut path_len = 0;
+        let mut current_node_idx = 0; // Start at root
+
+        // Traverse internal levels (0..K::LEVELS-1)
+        for level in 0..(K::LEVELS - 1) {
+            let byte = key.byte_at(level);
+            path[path_len] = (current_node_idx, byte);
+            path_len += 1;
+
+            let current_node = node_arena.get(current_node_idx);
+
+            if !current_node.has_child(byte) {
+                // Path doesn't exist → backtrack to find next leaf
+                return self.successor_backtrack(key, &path, path_len, arena_idx);
+            }
+
+            current_node_idx = current_node.get_child(byte);
+        }
+
+        // Final level: check if leaf exists
+        let last_node_byte = key.byte_at(K::LEVELS - 1);
+        path[path_len] = (current_node_idx, last_node_byte);
+        path_len += 1;
+
+        let final_node = node_arena.get(current_node_idx);
+
+        if !final_node.has_child(last_node_byte) {
+            // Leaf doesn't exist → backtrack to find next leaf
+            return self.successor_backtrack(key, &path, path_len, arena_idx);
+        }
+
+        let leaf_idx = final_node.get_child(last_node_byte);
+
+        // Leaf exists → search in leaf and next
+        self.successor_from_leaf_internal(key, leaf_idx, arena_idx)
+    }
+
+    /// Find successor starting from a specific leaf (for bulk operations).
+    ///
+    /// Optimized version for ordered bulk operations (iterators, ranges).
+    /// Assumes the leaf index is already known (cached from previous operation).
+    ///
+    /// # Algorithm (from cached leaf)
+    /// 1. Search for next bit in current leaf bitmap (O(1))
+    /// 2. If not found, follow leaf.next to next leaf (O(1))
+    /// 3. Take minimum bit from next leaf
+    /// 4. Reconstruct key from prefix + bit
+    ///
+    /// # Arguments
+    /// * `key` - The key to find successor for
+    /// * `leaf_idx` - Index of the leaf to start search from (cached)
+    ///
+    /// # Returns
+    /// Next key after given key, or None if no successor exists
+    ///
+    /// # Performance
+    /// O(1) - direct leaf access, no trie traversal
+    ///
+    /// # Use Case
+    /// Iterators and range operations cache the last accessed leaf index
+    /// and use this method for subsequent calls, achieving O(1) per element.
+    pub fn successor_from_leaf(&self, key: K, leaf_idx: u32) -> Option<K> {
+        let segment_meta = self.allocator.get_segment_meta(self.root_segment)?;
+        let arena_idx = segment_meta.cache_key;
+        self.successor_from_leaf_internal(key, leaf_idx, arena_idx)
+    }
+
+    /// Internal helper for successor from leaf.
+    fn successor_from_leaf_internal(&self, key: K, leaf_idx: u32, arena_idx: u64) -> Option<K> {
+        let leaf_arena = self.allocator.get_leaf_arena(arena_idx)?;
+        let leaf = leaf_arena.get(leaf_idx);
+
+        // Try to find successor in current leaf
+        let last_byte = key.last_byte();
+        if let Some(next_bit) = crate::bitmap::next_set_bit(&leaf.bitmap, last_byte) {
+            // Found in same leaf - O(1) for clustered data!
+            let mut key_value = key.prefix().to_u128();
+            key_value |= next_bit as u128;
+            return Some(K::from_u128(key_value));
+        }
+
+        // Not in current leaf - try next leaf via linked list
+        if leaf.next != crate::constants::EMPTY {
+            let next_leaf = leaf_arena.get(leaf.next);
+            if let Some(min_bit) = crate::bitmap::min_bit(&next_leaf.bitmap) {
+                // Found in next leaf - O(1) for adjacent leaves!
+                let mut key_value = (next_leaf.prefix as u128) << 8;
+                key_value |= min_bit as u128;
+                return Some(K::from_u128(key_value));
+            }
+        }
+
+        // No successor found
+        None
+    }
+
+    /// Backtrack to find next leaf when path doesn't exist.
+    fn successor_backtrack(
+        &self,
+        key: K,
+        path: &[(u32, u8)],
+        path_len: usize,
+        arena_idx: u64,
+    ) -> Option<K> {
+        // Find next leaf using backtracking
+        let next_leaf_idx = self.find_next_leaf(path, path_len, arena_idx);
+        
+        if next_leaf_idx == crate::constants::EMPTY {
+            return None;
+        }
+
+        // Get minimum key from next leaf
+        let leaf_arena = self.allocator.get_leaf_arena(arena_idx)?;
+        let next_leaf = leaf_arena.get(next_leaf_idx);
+        
+        if let Some(min_bit) = crate::bitmap::min_bit(&next_leaf.bitmap) {
+            let mut key_value = (next_leaf.prefix as u128) << 8;
+            key_value |= min_bit as u128;
+            return Some(K::from_u128(key_value));
+        }
+
+        None
+    }
+
     /// Update min/max cache after insert.
     ///
     /// Called when a new key is inserted to maintain cached min/max values.
