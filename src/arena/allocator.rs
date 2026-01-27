@@ -77,7 +77,7 @@ impl ArenaAllocator {
     /// ~200 bytes per segment (SegmentMeta + SegmentCache + Vec overhead)
     pub fn create_segment(&mut self, key_range: KeyRange, numa_node: u8) -> SegmentId {
         // Calculate cache_key (physical position in arena Vec)
-        let cache_key = self.node_arenas.len() as u32;
+        let cache_key = self.node_arenas.len() as u64;
 
         // Calculate run_length (number of arenas needed for this key range)
         // For now, allocate 1 arena - will expand as needed
@@ -197,7 +197,7 @@ impl ArenaAllocator {
     ///
     /// # Performance
     /// O(1) - direct Vec indexing
-    pub fn get_node_arena(&self, arena_idx: u32) -> Option<&Arena<Node>> {
+    pub fn get_node_arena(&self, arena_idx: u64) -> Option<&Arena<Node>> {
         self.node_arenas
             .get(arena_idx as usize)
             .and_then(|opt| opt.as_ref())
@@ -216,7 +216,7 @@ impl ArenaAllocator {
     ///
     /// # Performance
     /// O(1) - direct Vec indexing
-    pub fn get_node_arena_mut(&mut self, arena_idx: u32) -> Option<&mut Arena<Node>> {
+    pub fn get_node_arena_mut(&mut self, arena_idx: u64) -> Option<&mut Arena<Node>> {
         self.node_arenas
             .get_mut(arena_idx as usize)
             .and_then(|opt| opt.as_mut())
@@ -235,7 +235,7 @@ impl ArenaAllocator {
     ///
     /// # Performance
     /// O(1) - direct Vec indexing
-    pub fn get_leaf_arena(&self, arena_idx: u32) -> Option<&Arena<Leaf>> {
+    pub fn get_leaf_arena(&self, arena_idx: u64) -> Option<&Arena<Leaf>> {
         self.leaf_arenas
             .get(arena_idx as usize)
             .and_then(|opt| opt.as_ref())
@@ -254,7 +254,7 @@ impl ArenaAllocator {
     ///
     /// # Performance
     /// O(1) - direct Vec indexing
-    pub fn get_leaf_arena_mut(&mut self, arena_idx: u32) -> Option<&mut Arena<Leaf>> {
+    pub fn get_leaf_arena_mut(&mut self, arena_idx: u64) -> Option<&mut Arena<Leaf>> {
         self.leaf_arenas
             .get_mut(arena_idx as usize)
             .and_then(|opt| opt.as_mut())

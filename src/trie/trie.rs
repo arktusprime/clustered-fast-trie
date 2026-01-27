@@ -244,7 +244,7 @@ impl<K: TrieKey> Trie<K> {
     }
 
     /// Ensure root node exists at index 0 in node arena.
-    fn ensure_root_node(&mut self, arena_idx: u32) -> u32 {
+    fn ensure_root_node(&mut self, arena_idx: u64) -> u32 {
         let node_arena = self
             .allocator
             .get_node_arena_mut(arena_idx)
@@ -260,7 +260,7 @@ impl<K: TrieKey> Trie<K> {
     }
 
     /// Traverse trie levels to find or create leaf.
-    fn traverse_to_leaf(&mut self, key: K, _current_node_idx: u32, arena_idx: u32) -> u32 {
+    fn traverse_to_leaf(&mut self, key: K, _current_node_idx: u32, arena_idx: u64) -> u32 {
         // For now, simplified: check if leaf already exists at index 0
         // TODO: Implement full traversal logic
 
@@ -281,7 +281,7 @@ impl<K: TrieKey> Trie<K> {
     }
 
     /// Set bit in leaf bitmap for the given key.
-    fn set_bit_in_leaf(&mut self, key: K, leaf_idx: u32, arena_idx: u32) -> bool {
+    fn set_bit_in_leaf(&mut self, key: K, leaf_idx: u32, arena_idx: u64) -> bool {
         use crate::bitmap::test_and_set_bit;
 
         let leaf_arena = self
@@ -297,7 +297,7 @@ impl<K: TrieKey> Trie<K> {
     }
 
     /// Check if bit is set in leaf bitmap for the given key.
-    fn check_bit_in_leaf(&self, key: K, leaf_idx: u32, arena_idx: u32) -> bool {
+    fn check_bit_in_leaf(&self, key: K, leaf_idx: u32, arena_idx: u64) -> bool {
         use crate::bitmap::is_set;
 
         let leaf_arena = self
@@ -313,7 +313,7 @@ impl<K: TrieKey> Trie<K> {
     }
 
     /// Clear bit in leaf bitmap for the given key.
-    fn clear_bit_in_leaf(&mut self, key: K, leaf_idx: u32, arena_idx: u32) -> bool {
+    fn clear_bit_in_leaf(&mut self, key: K, leaf_idx: u32, arena_idx: u64) -> bool {
         use crate::bitmap::{clear_bit, is_set};
 
         let leaf_arena = self
