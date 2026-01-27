@@ -806,6 +806,55 @@ impl<K: TrieKey> Trie<K> {
         was_set
     }
 
+    /// Remove leaf from linked list.
+    ///
+    /// Unlinks the leaf from the doubly-linked list by updating the next/prev
+    /// pointers of its neighbors. Also updates first_leaf_idx/last_leaf_idx
+    /// if the removed leaf was at a boundary.
+    ///
+    /// # Algorithm
+    /// 1. Get prev/next indices from the leaf being removed
+    /// 2. Update prev leaf's next pointer to skip removed leaf
+    /// 3. Update next leaf's prev pointer to skip removed leaf
+    /// 4. Update first_leaf_idx if removed leaf was first
+    /// 5. Update last_leaf_idx if removed leaf was last
+    ///
+    /// # Arguments
+    /// * `leaf_idx` - Index of the leaf to remove from list
+    /// * `arena_idx` - Arena index for storage
+    ///
+    /// # Performance
+    /// O(1) - direct pointer updates using prev/next fields
+    fn unlink_leaf(&mut self, leaf_idx: u32, arena_idx: u64) {
+        let leaf_arena = self
+            .allocator
+            .get_leaf_arena_mut(arena_idx)
+            .expect("Leaf arena should be allocated");
+
+        // Get prev/next from the leaf being removed
+        let leaf = leaf_arena.get(leaf_idx);
+        let prev_idx = leaf.prev;
+        let next_idx = leaf.next;
+
+        // Update prev leaf's next pointer
+        if prev_idx == crate::constants::EMPTY {
+            // Removed leaf was first - update first_leaf_idx
+            self.first_leaf_idx = next_idx;
+        } else {
+            let prev_leaf = leaf_arena.get_mut(prev_idx);
+            prev_leaf.next = next_idx;
+        }
+
+        // Update next leaf's prev pointer
+        if next_idx == crate::constants::EMPTY {
+            // Removed leaf was last - update last_leaf_idx
+            self.last_leaf_idx = prev_idx;
+        } else {
+            let next_leaf = leaf_arena.get_mut(next_idx);
+            next_leaf.prev = prev_idx;
+        }
+    }
+
     /// Insert leaf into linked list in sorted order.
     ///
     /// Links the newly created leaf into the doubly-linked list of leaves,
