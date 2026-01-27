@@ -344,6 +344,10 @@ impl<K: TrieKey> Trie<K> {
             self.cleanup_empty_nodes(&path, path_len - 1, arena_idx);
         }
 
+        // Step 7: Update cache
+        self.len -= 1;
+        self.update_min_max_remove(key);
+
         true
     }
 
@@ -451,6 +455,59 @@ impl<K: TrieKey> Trie<K> {
             Some(m) if key > m => self.max_key = Some(key),
             _ => {}
         }
+    }
+
+    /// Update min/max cache after remove.
+    ///
+    /// Called when a key is removed to maintain cached min/max values.
+    /// If the removed key was min or max, searches for new value.
+    ///
+    /// # Performance
+    /// O(1) if removed key is not min/max
+    /// O(log log U) if need to find new min/max
+    #[inline]
+    fn update_min_max_remove(&mut self, key: K) {
+        if self.len == 0 {
+            // Trie is now empty
+            self.min_key = None;
+            self.max_key = None;
+        } else {
+            // Check if we removed min or max
+            if self.min_key == Some(key) {
+                self.min_key = self.find_min();
+            }
+            if self.max_key == Some(key) {
+                self.max_key = self.find_max();
+            }
+        }
+    }
+
+    /// Find minimum key by traversing leftmost path.
+    ///
+    /// Traverses from root to leaf, always taking the minimum child at each level.
+    ///
+    /// # Performance
+    /// O(log log U) - traverses K::LEVELS levels
+    ///
+    /// # Returns
+    /// Minimum key in the trie, or None if empty
+    fn find_min(&self) -> Option<K> {
+        // TODO: Implement in next step
+        None
+    }
+
+    /// Find maximum key by traversing rightmost path.
+    ///
+    /// Traverses from root to leaf, always taking the maximum child at each level.
+    ///
+    /// # Performance
+    /// O(log log U) - traverses K::LEVELS levels
+    ///
+    /// # Returns
+    /// Maximum key in the trie, or None if empty
+    fn find_max(&self) -> Option<K> {
+        // TODO: Implement in next step
+        None
     }
 
     /// Ensure root node exists at index 0 in node arena.

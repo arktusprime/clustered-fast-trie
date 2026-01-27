@@ -39,6 +39,34 @@ impl Node {
     pub fn child_count(&self) -> u32 {
         bitmap::count_bits(&self.bitmap)
     }
+
+    /// Find minimum child index (first set bit in bitmap).
+    ///
+    /// Traverses bitmap words from lowest to highest, finding the first set bit.
+    ///
+    /// # Returns
+    /// Minimum child index (0-255), or None if node is empty
+    ///
+    /// # Performance
+    /// O(1) - uses TZCNT instruction (trailing zeros count)
+    #[inline]
+    pub fn min_child(&self) -> Option<u8> {
+        bitmap::min_bit(&self.bitmap)
+    }
+
+    /// Find maximum child index (last set bit in bitmap).
+    ///
+    /// Traverses bitmap words from highest to lowest, finding the last set bit.
+    ///
+    /// # Returns
+    /// Maximum child index (0-255), or None if node is empty
+    ///
+    /// # Performance
+    /// O(1) - uses LZCNT instruction (leading zeros count)
+    #[inline]
+    pub fn max_child(&self) -> Option<u8> {
+        bitmap::max_bit(&self.bitmap)
+    }
 }
 
 #[cfg(test)]
