@@ -4,7 +4,7 @@
 ///
 /// Supports u32, u64, and u128 with zero-cost abstraction.
 /// Each type uses native register sizes for optimal performance.
-pub trait TrieKey: Copy + Eq + Sized {
+pub trait TrieKey: Copy + Eq + PartialOrd + Sized {
     /// Number of internal levels (excludes leaf level).
     ///
     /// - u32: 3 levels (4 bytes, last byte in leaf)

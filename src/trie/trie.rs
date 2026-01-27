@@ -139,7 +139,15 @@ impl<K: TrieKey> Trie<K> {
         let (leaf_idx, _path, _path_len) = self.traverse_to_leaf(key, root_node_idx, arena_idx);
 
         // Step 5: Set bit in leaf bitmap
-        self.set_bit_in_leaf(key, leaf_idx, arena_idx)
+        let was_new = self.set_bit_in_leaf(key, leaf_idx, arena_idx);
+
+        // Step 6: Update cache if new insertion
+        if was_new {
+            self.len += 1;
+            self.update_min_max_insert(key);
+        }
+
+        was_new
     }
 
     /// Check if a key exists in the trie.
@@ -423,6 +431,26 @@ impl<K: TrieKey> Trie<K> {
     #[inline]
     pub fn max(&self) -> Option<K> {
         self.max_key
+    }
+
+    /// Update min/max cache after insert.
+    ///
+    /// Called when a new key is inserted to maintain cached min/max values.
+    ///
+    /// # Performance
+    /// O(1) - simple comparison and update
+    #[inline]
+    fn update_min_max_insert(&mut self, key: K) {
+        match self.min_key {
+            None => self.min_key = Some(key),
+            Some(m) if key < m => self.min_key = Some(key),
+            _ => {}
+        }
+        match self.max_key {
+            None => self.max_key = Some(key),
+            Some(m) if key > m => self.max_key = Some(key),
+            _ => {}
+        }
     }
 
     /// Ensure root node exists at index 0 in node arena.
@@ -1088,5 +1116,47 @@ mod tests {
 
         let leaf_arena = trie.allocator.get_leaf_arena(arena_idx).unwrap();
         assert!(leaf_arena.len() >= 1, "Should have at least one leaf");
+    }
+
+    #[test]
+    fn test_cache_updates_on_insert() {
+        let mut trie = Trie::<u64>::new();
+
+        // Initially empty
+        assert_eq!(trie.len(), 0);
+        assert_eq!(trie.min(), None);
+        assert_eq!(trie.max(), None);
+        assert!(trie.is_empty());
+
+        // Insert first key
+        assert!(trie.insert(100));
+        assert_eq!(trie.len(), 1);
+        assert_eq!(trie.min(), Some(100));
+        assert_eq!(trie.max(), Some(100));
+        assert!(!trie.is_empty());
+
+        // Insert smaller key (updates min)
+        assert!(trie.insert(50));
+        assert_eq!(trie.len(), 2);
+        assert_eq!(trie.min(), Some(50));
+        assert_eq!(trie.max(), Some(100));
+
+        // Insert larger key (updates max)
+        assert!(trie.insert(200));
+        assert_eq!(trie.len(), 3);
+        assert_eq!(trie.min(), Some(50));
+        assert_eq!(trie.max(), Some(200));
+
+        // Insert middle key (no min/max change)
+        assert!(trie.insert(75));
+        assert_eq!(trie.len(), 4);
+        assert_eq!(trie.min(), Some(50));
+        assert_eq!(trie.max(), Some(200));
+
+        // Insert duplicate (no changes)
+        assert!(!trie.insert(100));
+        assert_eq!(trie.len(), 4);
+        assert_eq!(trie.min(), Some(50));
+        assert_eq!(trie.max(), Some(200));
     }
 }
