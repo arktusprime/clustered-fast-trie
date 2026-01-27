@@ -250,12 +250,17 @@ impl<K: TrieKey> Trie<K> {
             return false; // No root node exists
         }
 
-        // Step 3: Traverse trie levels to find leaf
+        // Step 3: Traverse trie levels to find leaf, tracking path
+        let mut path: [(u32, u8); 16] = [(0, 0); 16]; // Max 16 levels for u128
+        let mut path_len = 0;
         let mut current_node_idx = 0; // Start at root
 
         // Traverse internal levels (0..K::LEVELS-1)
         for level in 0..(K::LEVELS - 1) {
             let byte = key.byte_at(level);
+            path[path_len] = (current_node_idx, byte);
+            path_len += 1;
+
             let current_node = node_arena.get(current_node_idx);
 
             if !current_node.has_child(byte) {
@@ -267,6 +272,9 @@ impl<K: TrieKey> Trie<K> {
 
         // Final level: check if leaf exists
         let last_node_byte = key.byte_at(K::LEVELS - 1);
+        path[path_len] = (current_node_idx, last_node_byte);
+        path_len += 1;
+
         let final_node = node_arena.get(current_node_idx);
 
         if !final_node.has_child(last_node_byte) {
@@ -282,7 +290,41 @@ impl<K: TrieKey> Trie<K> {
         };
 
         // Step 5: Clear bit in leaf bitmap
-        self.clear_bit_in_leaf(key, leaf_idx, arena_idx)
+        let was_removed = self.clear_bit_in_leaf(key, leaf_idx, arena_idx);
+
+        if !was_removed {
+            return false;
+        }
+
+        // Step 6: Check if leaf is empty and cleanup if needed
+        let is_leaf_empty = {
+            let leaf_arena = self
+                .allocator
+                .get_leaf_arena(arena_idx)
+                .expect("Leaf arena should be allocated");
+            let leaf = leaf_arena.get(leaf_idx);
+            crate::bitmap::is_empty(&leaf.bitmap)
+        };
+
+        if is_leaf_empty {
+            // Remove link from parent node
+            {
+                let node_arena = self
+                    .allocator
+                    .get_node_arena_mut(arena_idx)
+                    .expect("Node arena should be allocated");
+                let parent_node = node_arena.get_mut(current_node_idx);
+                parent_node.clear_child(last_node_byte);
+            }
+
+            // Free the leaf
+            self.allocator.free_leaf(arena_idx, leaf_idx);
+
+            // Cleanup empty nodes up the path
+            self.cleanup_empty_nodes(&path, path_len - 1, arena_idx);
+        }
+
+        true
     }
 
     /// Ensure root node exists at index 0 in node arena.
