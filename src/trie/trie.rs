@@ -492,8 +492,49 @@ impl<K: TrieKey> Trie<K> {
     /// # Returns
     /// Minimum key in the trie, or None if empty
     fn find_min(&self) -> Option<K> {
-        // TODO: Implement in next step
-        None
+        // Get segment metadata
+        let segment_meta = self.allocator.get_segment_meta(self.root_segment)?;
+        let arena_idx = segment_meta.cache_key;
+
+        // Get node arena
+        let node_arena = self.allocator.get_node_arena(arena_idx)?;
+        if node_arena.is_empty() {
+            return None;
+        }
+
+        // Start building key from most significant byte
+        let mut key_value: u128 = 0;
+        let mut current_node_idx = 0; // Start at root
+
+        // Traverse internal levels (0..K::LEVELS-1)
+        for level in 0..(K::LEVELS - 1) {
+            let node = node_arena.get(current_node_idx);
+            let min_byte = node.min_child()?;
+
+            // Add byte to key at current level
+            key_value |= (min_byte as u128) << ((K::LEVELS - level) * 8);
+
+            // Move to child node
+            current_node_idx = node.get_child(min_byte);
+        }
+
+        // Final level: find minimum child (leaf)
+        let final_node = node_arena.get(current_node_idx);
+        let min_leaf_byte = final_node.min_child()?;
+        key_value |= (min_leaf_byte as u128) << 8;
+
+        let leaf_idx = final_node.get_child(min_leaf_byte);
+
+        // Get leaf arena and find minimum bit
+        let leaf_arena = self.allocator.get_leaf_arena(arena_idx)?;
+        let leaf = leaf_arena.get(leaf_idx);
+        let min_bit = crate::bitmap::min_bit(&leaf.bitmap)?;
+
+        // Add final byte to key
+        key_value |= min_bit as u128;
+
+        // Convert u128 back to key type K
+        Some(K::from_u128(key_value))
     }
 
     /// Find maximum key by traversing rightmost path.
@@ -506,8 +547,49 @@ impl<K: TrieKey> Trie<K> {
     /// # Returns
     /// Maximum key in the trie, or None if empty
     fn find_max(&self) -> Option<K> {
-        // TODO: Implement in next step
-        None
+        // Get segment metadata
+        let segment_meta = self.allocator.get_segment_meta(self.root_segment)?;
+        let arena_idx = segment_meta.cache_key;
+
+        // Get node arena
+        let node_arena = self.allocator.get_node_arena(arena_idx)?;
+        if node_arena.is_empty() {
+            return None;
+        }
+
+        // Start building key from most significant byte
+        let mut key_value: u128 = 0;
+        let mut current_node_idx = 0; // Start at root
+
+        // Traverse internal levels (0..K::LEVELS-1)
+        for level in 0..(K::LEVELS - 1) {
+            let node = node_arena.get(current_node_idx);
+            let max_byte = node.max_child()?;
+
+            // Add byte to key at current level
+            key_value |= (max_byte as u128) << ((K::LEVELS - level) * 8);
+
+            // Move to child node
+            current_node_idx = node.get_child(max_byte);
+        }
+
+        // Final level: find maximum child (leaf)
+        let final_node = node_arena.get(current_node_idx);
+        let max_leaf_byte = final_node.max_child()?;
+        key_value |= (max_leaf_byte as u128) << 8;
+
+        let leaf_idx = final_node.get_child(max_leaf_byte);
+
+        // Get leaf arena and find maximum bit
+        let leaf_arena = self.allocator.get_leaf_arena(arena_idx)?;
+        let leaf = leaf_arena.get(leaf_idx);
+        let max_bit = crate::bitmap::max_bit(&leaf.bitmap)?;
+
+        // Add final byte to key
+        key_value |= max_bit as u128;
+
+        // Convert u128 back to key type K
+        Some(K::from_u128(key_value))
     }
 
     /// Ensure root node exists at index 0 in node arena.
