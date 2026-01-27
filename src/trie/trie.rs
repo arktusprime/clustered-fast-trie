@@ -624,4 +624,217 @@ mod tests {
             assert!(trie.contains(key));
         }
     }
+
+    #[test]
+    fn test_multi_level_structure_u32() {
+        let mut trie = Trie::<u32>::new();
+
+        // For u32, we have 4 levels (0, 1, 2, 3)
+        // Key structure: [byte0][byte1][byte2][byte3]
+        // Levels 0-2: internal Nodes
+        // Level 3: Node points to Leaf
+
+        // Insert keys that differ at different levels
+        // Key 0x01020304 = [1][2][3][4]
+        // Key 0x01020305 = [1][2][3][5] - shares path up to level 2
+        // Key 0x01020404 = [1][2][4][4] - shares path up to level 1
+        // Key 0x01030304 = [1][3][3][4] - shares path up to level 0
+
+        let key1 = 0x01020304u32;
+        let key2 = 0x01020305u32;
+        let key3 = 0x01020404u32;
+        let key4 = 0x01030304u32;
+
+        // Insert all keys
+        assert!(trie.insert(key1));
+        assert!(trie.insert(key2));
+        assert!(trie.insert(key3));
+        assert!(trie.insert(key4));
+
+        // Verify all keys exist
+        assert!(trie.contains(key1));
+        assert!(trie.contains(key2));
+        assert!(trie.contains(key3));
+        assert!(trie.contains(key4));
+
+        // Get arena index
+        let segment_meta = trie.allocator.get_segment_meta(trie.root_segment).unwrap();
+        let arena_idx = segment_meta.cache_key;
+
+        // Check that node arena has multiple nodes
+        let node_arena = trie.allocator.get_node_arena(arena_idx).unwrap();
+        // Should have: root + nodes for different branches
+        // At minimum: 1 root + nodes for different paths
+        assert!(
+            node_arena.len() > 1,
+            "Should have multiple nodes for different paths"
+        );
+
+        // Check that leaf arena has multiple leaves
+        let leaf_arena = trie.allocator.get_leaf_arena(arena_idx).unwrap();
+        // Keys with different prefixes should create different leaves
+        assert!(
+            leaf_arena.len() >= 2,
+            "Should have multiple leaves for different prefixes"
+        );
+    }
+
+    #[test]
+    fn test_multi_level_structure_u64() {
+        let mut trie = Trie::<u64>::new();
+
+        // For u64, we have 8 levels (0-7)
+        // Insert keys that differ at different levels
+
+        let key1 = 0x0102030405060708u64;
+        let key2 = 0x0102030405060709u64; // Differs at last byte
+        let key3 = 0x0102030405070708u64; // Differs at byte 6
+        let key4 = 0x0102030506060708u64; // Differs at byte 5
+
+        // Insert all keys
+        assert!(trie.insert(key1));
+        assert!(trie.insert(key2));
+        assert!(trie.insert(key3));
+        assert!(trie.insert(key4));
+
+        // Verify all keys exist
+        assert!(trie.contains(key1));
+        assert!(trie.contains(key2));
+        assert!(trie.contains(key3));
+        assert!(trie.contains(key4));
+
+        // Get arena index
+        let segment_meta = trie.allocator.get_segment_meta(trie.root_segment).unwrap();
+        let arena_idx = segment_meta.cache_key;
+
+        // Check that node arena has multiple nodes
+        let node_arena = trie.allocator.get_node_arena(arena_idx).unwrap();
+        assert!(
+            node_arena.len() > 1,
+            "Should have multiple nodes for u64 keys"
+        );
+
+        // Check that leaf arena has multiple leaves
+        let leaf_arena = trie.allocator.get_leaf_arena(arena_idx).unwrap();
+        assert!(
+            leaf_arena.len() >= 2,
+            "Should have multiple leaves for different prefixes"
+        );
+    }
+
+    #[test]
+    fn test_different_prefixes() {
+        let mut trie = Trie::<u32>::new();
+
+        // Insert keys with completely different first bytes
+        // This should create separate branches from root
+        let key1 = 0x01000000u32; // First byte = 1
+        let key2 = 0x02000000u32; // First byte = 2
+        let key3 = 0x03000000u32; // First byte = 3
+
+        assert!(trie.insert(key1));
+        assert!(trie.insert(key2));
+        assert!(trie.insert(key3));
+
+        // All keys should exist
+        assert!(trie.contains(key1));
+        assert!(trie.contains(key2));
+        assert!(trie.contains(key3));
+
+        // Get arena index
+        let segment_meta = trie.allocator.get_segment_meta(trie.root_segment).unwrap();
+        let arena_idx = segment_meta.cache_key;
+
+        // Check root node has 3 children (for bytes 1, 2, 3)
+        let node_arena = trie.allocator.get_node_arena(arena_idx).unwrap();
+        let root_node = node_arena.get(0);
+
+        assert!(root_node.has_child(0x01));
+        assert!(root_node.has_child(0x02));
+        assert!(root_node.has_child(0x03));
+        assert!(!root_node.has_child(0x04));
+
+        // Should have created separate leaves for each prefix
+        let leaf_arena = trie.allocator.get_leaf_arena(arena_idx).unwrap();
+        assert_eq!(leaf_arena.len(), 3, "Should have 3 separate leaves");
+    }
+
+    #[test]
+    fn test_shared_prefix_path() {
+        let mut trie = Trie::<u32>::new();
+
+        // Insert keys that share a common prefix
+        // Key 0x01020300 = [1][2][3][0]
+        // Key 0x01020301 = [1][2][3][1]
+        // Key 0x01020302 = [1][2][3][2]
+        // All share prefix [1][2][3], so should share path up to level 2
+
+        let key1 = 0x01020300u32;
+        let key2 = 0x01020301u32;
+        let key3 = 0x01020302u32;
+
+        assert!(trie.insert(key1));
+        assert!(trie.insert(key2));
+        assert!(trie.insert(key3));
+
+        // All keys should exist
+        assert!(trie.contains(key1));
+        assert!(trie.contains(key2));
+        assert!(trie.contains(key3));
+
+        // Get arena index
+        let segment_meta = trie.allocator.get_segment_meta(trie.root_segment).unwrap();
+        let arena_idx = segment_meta.cache_key;
+
+        // All keys share same prefix [1][2][3], so should have same leaf
+        let leaf_arena = trie.allocator.get_leaf_arena(arena_idx).unwrap();
+        assert_eq!(
+            leaf_arena.len(),
+            1,
+            "Keys with same prefix should share one leaf"
+        );
+
+        // Check that the leaf has 3 bits set (for last bytes 0, 1, 2)
+        let leaf = leaf_arena.get(0);
+        use crate::bitmap::is_set;
+        assert!(is_set(&leaf.bitmap, 0));
+        assert!(is_set(&leaf.bitmap, 1));
+        assert!(is_set(&leaf.bitmap, 2));
+        assert!(!is_set(&leaf.bitmap, 3));
+    }
+
+    #[test]
+    fn test_u128_multi_level() {
+        let mut trie = Trie::<u128>::new();
+
+        // For u128, we have 16 levels (0-15)
+        // Insert keys that differ at various levels
+
+        let key1 = 0x0102030405060708090A0B0C0D0E0F10u128;
+        let key2 = 0x0102030405060708090A0B0C0D0E0F11u128; // Differs at last byte
+        let key3 = 0x0102030405060708090A0B0C0D0E1011u128; // Differs at byte 14
+
+        assert!(trie.insert(key1));
+        assert!(trie.insert(key2));
+        assert!(trie.insert(key3));
+
+        // Verify all keys exist
+        assert!(trie.contains(key1));
+        assert!(trie.contains(key2));
+        assert!(trie.contains(key3));
+
+        // Get arena index
+        let segment_meta = trie.allocator.get_segment_meta(trie.root_segment).unwrap();
+        let arena_idx = segment_meta.cache_key;
+
+        // Check that structures were created
+        let node_arena = trie.allocator.get_node_arena(arena_idx).unwrap();
+        assert!(
+            node_arena.len() > 1,
+            "Should have multiple nodes for u128 keys"
+        );
+
+        let leaf_arena = trie.allocator.get_leaf_arena(arena_idx).unwrap();
+        assert!(leaf_arena.len() >= 1, "Should have at least one leaf");
+    }
 }
