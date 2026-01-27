@@ -124,7 +124,7 @@ impl<K: TrieKey> Trie<K> {
         let root_node_idx = self.ensure_root_node(arena_idx);
 
         // Step 4: Traverse trie levels to find/create path to leaf
-        let leaf_idx = self.traverse_to_leaf(key, root_node_idx, arena_idx);
+        let (leaf_idx, _path, _path_len) = self.traverse_to_leaf(key, root_node_idx, arena_idx);
 
         // Step 5: Set bit in leaf bitmap
         self.set_bit_in_leaf(key, leaf_idx, arena_idx)
@@ -305,27 +305,50 @@ impl<K: TrieKey> Trie<K> {
     ///
     /// Performs full traversal through internal Node structures at each level,
     /// creating nodes as needed. On the final level, finds or creates a Leaf.
+    /// Collects the path during traversal for later cleanup operations.
     ///
     /// # Algorithm
     /// 1. Start at root node
     /// 2. For each level (0..K::LEVELS-1):
     ///    - Extract byte at current level from key
+    ///    - Record (node_idx, byte) in path
     ///    - Check if child exists for this byte
     ///    - If exists: move to that child node
     ///    - If not: create new node and link it
     /// 3. At final level (K::LEVELS-1):
     ///    - Extract last byte before leaf level
+    ///    - Record (node_idx, byte) in path
     ///    - Check if leaf exists for this byte
-    ///    - If exists: return leaf index
+    ///    - If exists: return (leaf_idx, path, path_len)
     ///    - If not: create new leaf and link it
     ///
     /// # Performance
     /// O(K::LEVELS) = O(log log U) where U is key space size
-    fn traverse_to_leaf(&mut self, key: K, mut current_node_idx: u32, arena_idx: u64) -> u32 {
+    ///
+    /// # Returns
+    /// (leaf_idx, path, path_len) where:
+    /// - leaf_idx: index of the leaf in leaf arena
+    /// - path: array of (node_idx, byte) pairs representing the path from root
+    /// - path_len: number of valid entries in path array
+    fn traverse_to_leaf(
+        &mut self,
+        key: K,
+        mut current_node_idx: u32,
+        arena_idx: u64,
+    ) -> (u32, [(u32, u8); 16], usize) {
+        // Path tracking: (node_idx, byte) for each level
+        // Max 16 levels for u128 (0..15)
+        let mut path = [(0u32, 0u8); 16];
+        let mut path_len = 0;
+
         // Traverse internal levels (0..K::LEVELS-1)
         // Each level navigates through Node structures
         for level in 0..(K::LEVELS - 1) {
             let byte = key.byte_at(level);
+
+            // Record current node and byte in path
+            path[path_len] = (current_node_idx, byte);
+            path_len += 1;
 
             // Check if child exists (read-only operation)
             let child_idx = {
@@ -362,6 +385,10 @@ impl<K: TrieKey> Trie<K> {
         // Final level (K::LEVELS - 1): transition from Node to Leaf
         let last_node_byte = key.byte_at(K::LEVELS - 1);
 
+        // Record final node and byte in path
+        path[path_len] = (current_node_idx, last_node_byte);
+        path_len += 1;
+
         // Check if leaf exists (read-only operation)
         let leaf_idx = {
             let node_arena = self
@@ -377,7 +404,7 @@ impl<K: TrieKey> Trie<K> {
             }
         };
 
-        if let Some(idx) = leaf_idx {
+        let leaf_idx = if let Some(idx) = leaf_idx {
             // Leaf already exists
             idx
         } else {
@@ -398,7 +425,10 @@ impl<K: TrieKey> Trie<K> {
             final_node.set_child(last_node_byte, new_leaf_idx);
 
             new_leaf_idx
-        }
+        };
+
+        // Return tuple: (leaf_idx, path, path_len)
+        (leaf_idx, path, path_len)
     }
 
     /// Set bit in leaf bitmap for the given key.
