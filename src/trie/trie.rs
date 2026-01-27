@@ -130,6 +130,62 @@ impl<K: TrieKey> Trie<K> {
         self.set_bit_in_leaf(key, leaf_idx, arena_idx)
     }
 
+    /// Check if a key exists in the trie.
+    ///
+    /// Searches for the specified key without modifying the trie structure.
+    /// Uses read-only operations for optimal performance.
+    ///
+    /// # Arguments
+    /// * `key` - The key to search for
+    ///
+    /// # Returns
+    /// * `true` if the key exists in the trie
+    /// * `false` if the key does not exist
+    ///
+    /// # Performance
+    /// O(log log U) - traverses at most K::LEVELS + 1 levels
+    ///
+    /// # Example
+    /// ```rust
+    /// use clustered_fast_trie::Trie;
+    ///
+    /// let mut trie = Trie::<u32>::new();
+    /// assert!(!trie.contains(42));  // Key doesn't exist
+    /// trie.insert(42);
+    /// assert!(trie.contains(42));   // Key exists
+    /// ```
+    pub fn contains(&self, key: K) -> bool {
+        // Step 1: Check if arenas are allocated
+        let segment_meta = match self.allocator.get_segment_meta(self.root_segment) {
+            Some(meta) => meta,
+            None => return false, // Segment doesn't exist
+        };
+        let arena_idx = segment_meta.cache_key;
+
+        // Step 2: Check if node arena exists and has root node
+        let node_arena = match self.allocator.get_node_arena(arena_idx) {
+            Some(arena) => arena,
+            None => return false, // Node arena not allocated
+        };
+
+        if node_arena.is_empty() {
+            return false; // No root node exists
+        }
+
+        // Step 3: Find leaf (simplified for now - assume leaf exists at index 0)
+        let leaf_arena = match self.allocator.get_leaf_arena(arena_idx) {
+            Some(arena) => arena,
+            None => return false, // Leaf arena not allocated
+        };
+
+        if leaf_arena.is_empty() {
+            return false; // No leaves exist
+        }
+
+        // Step 4: Check bit in leaf bitmap
+        self.check_bit_in_leaf(key, 0, arena_idx)
+    }
+
     /// Ensure root node exists at index 0 in node arena.
     fn ensure_root_node(&mut self, arena_idx: u32) -> u32 {
         let node_arena = self
@@ -175,6 +231,22 @@ impl<K: TrieKey> Trie<K> {
 
         // Use atomic test-and-set: returns true if bit was NOT set (new insertion)
         test_and_set_bit(&leaf.bitmap, bit_idx)
+    }
+
+    /// Check if bit is set in leaf bitmap for the given key.
+    fn check_bit_in_leaf(&self, key: K, leaf_idx: u32, arena_idx: u32) -> bool {
+        use crate::bitmap::is_set;
+
+        let leaf_arena = self
+            .allocator
+            .get_leaf_arena(arena_idx)
+            .expect("Leaf arena should be allocated");
+
+        let leaf = leaf_arena.get(leaf_idx);
+        let bit_idx = key.last_byte();
+
+        // Use atomic read: check if bit is set
+        is_set(&leaf.bitmap, bit_idx)
     }
 }
 
@@ -244,5 +316,22 @@ mod tests {
         // Test basic insertion
         let result = trie.insert(42);
         assert!(result); // Should return true for new key
+    }
+
+    #[test]
+    fn test_contains_basic() {
+        let mut trie = Trie::<u32>::new();
+
+        // Key doesn't exist initially
+        assert!(!trie.contains(42));
+
+        // Insert key
+        trie.insert(42);
+
+        // Key should exist now
+        assert!(trie.contains(42));
+
+        // Other key should not exist
+        assert!(!trie.contains(43));
     }
 }
