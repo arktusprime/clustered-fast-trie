@@ -806,6 +806,84 @@ impl<K: TrieKey> Trie<K> {
         was_set
     }
 
+    /// Find previous leaf using trie backtracking.
+    ///
+    /// Backtracks through the path to find the predecessor leaf.
+    /// At each level, checks if there's a predecessor child, and if found,
+    /// descends to the maximum leaf in that branch.
+    ///
+    /// # Arguments
+    /// * `path` - Array of (node_idx, byte) pairs from root to current position
+    /// * `path_len` - Number of valid entries in path
+    /// * `arena_idx` - Arena index for storage
+    ///
+    /// # Returns
+    /// Index of the previous leaf in sorted order, or EMPTY if none exists
+    ///
+    /// # Performance
+    /// O(log log U) - backtracks at most K::LEVELS levels
+    fn find_prev_leaf(&self, path: &[(u32, u8)], path_len: usize, arena_idx: u64) -> u32 {
+        let node_arena = match self.allocator.get_node_arena(arena_idx) {
+            Some(arena) => arena,
+            None => return crate::constants::EMPTY,
+        };
+
+        // Backtrack through path to find predecessor branch
+        for i in (0..path_len).rev() {
+            let (node_idx, byte) = path[i];
+            let node = node_arena.get(node_idx);
+
+            // Check if there's a predecessor child at this level
+            if let Some(pred_byte) = node.predecessor_child(byte) {
+                // Found predecessor branch - descend to maximum leaf
+                let pred_child_idx = node.get_child(pred_byte);
+                return self.find_max_leaf_from(pred_child_idx, i + 1, arena_idx);
+            }
+        }
+
+        // No predecessor found
+        crate::constants::EMPTY
+    }
+
+    /// Find next leaf using trie backtracking.
+    ///
+    /// Backtracks through the path to find the successor leaf.
+    /// At each level, checks if there's a successor child, and if found,
+    /// descends to the minimum leaf in that branch.
+    ///
+    /// # Arguments
+    /// * `path` - Array of (node_idx, byte) pairs from root to current position
+    /// * `path_len` - Number of valid entries in path
+    /// * `arena_idx` - Arena index for storage
+    ///
+    /// # Returns
+    /// Index of the next leaf in sorted order, or EMPTY if none exists
+    ///
+    /// # Performance
+    /// O(log log U) - backtracks at most K::LEVELS levels
+    fn find_next_leaf(&self, path: &[(u32, u8)], path_len: usize, arena_idx: u64) -> u32 {
+        let node_arena = match self.allocator.get_node_arena(arena_idx) {
+            Some(arena) => arena,
+            None => return crate::constants::EMPTY,
+        };
+
+        // Backtrack through path to find successor branch
+        for i in (0..path_len).rev() {
+            let (node_idx, byte) = path[i];
+            let node = node_arena.get(node_idx);
+
+            // Check if there's a successor child at this level
+            if let Some(succ_byte) = node.successor_child(byte) {
+                // Found successor branch - descend to minimum leaf
+                let succ_child_idx = node.get_child(succ_byte);
+                return self.find_min_leaf_from(succ_child_idx, i + 1, arena_idx);
+            }
+        }
+
+        // No successor found
+        crate::constants::EMPTY
+    }
+
     /// Find minimum leaf starting from a node at given level.
     ///
     /// Descends from the specified node, always taking the minimum child
