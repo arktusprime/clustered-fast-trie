@@ -806,6 +806,72 @@ impl<K: TrieKey> Trie<K> {
         was_set
     }
 
+    /// Insert leaf into linked list in sorted order.
+    ///
+    /// Links the newly created leaf into the doubly-linked list of leaves,
+    /// maintaining sorted order by prefix. Updates next/prev pointers for
+    /// the new leaf and its neighbors, and updates first_leaf_idx/last_leaf_idx
+    /// if necessary.
+    ///
+    /// # Algorithm
+    /// 1. If this is the first leaf: set first_leaf_idx and last_leaf_idx
+    /// 2. Find prev/next leaves using trie backtracking (O(log log U))
+    /// 3. Update new leaf's prev/next pointers
+    /// 4. Update neighbors' pointers to link to new leaf
+    /// 5. Update first_leaf_idx/last_leaf_idx if at boundaries
+    ///
+    /// # Arguments
+    /// * `new_leaf_idx` - Index of the newly created leaf
+    /// * `path` - Array of (node_idx, byte) pairs from root to leaf
+    /// * `path_len` - Number of valid entries in path
+    /// * `arena_idx` - Arena index for storage
+    ///
+    /// # Performance
+    /// O(log log U) - uses trie structure to find neighbors efficiently
+    fn link_leaf(&mut self, new_leaf_idx: u32, path: &[(u32, u8)], path_len: usize, arena_idx: u64) {
+        // Check if this is the first leaf
+        if self.first_leaf_idx == crate::constants::EMPTY {
+            // First leaf ever - initialize list
+            self.first_leaf_idx = new_leaf_idx;
+            self.last_leaf_idx = new_leaf_idx;
+            // new leaf already has prev=EMPTY and next=EMPTY from Leaf::new()
+            return;
+        }
+
+        // Find prev/next leaves using trie backtracking
+        let prev_leaf_idx = self.find_prev_leaf(path, path_len, arena_idx);
+        let next_leaf_idx = self.find_next_leaf(path, path_len, arena_idx);
+
+        // Get leaf arena for updates
+        let leaf_arena = self
+            .allocator
+            .get_leaf_arena_mut(arena_idx)
+            .expect("Leaf arena should be allocated");
+
+        // Update new leaf's pointers
+        let new_leaf = leaf_arena.get_mut(new_leaf_idx);
+        new_leaf.prev = prev_leaf_idx;
+        new_leaf.next = next_leaf_idx;
+
+        // Update prev leaf's next pointer
+        if prev_leaf_idx == crate::constants::EMPTY {
+            // New leaf is now first
+            self.first_leaf_idx = new_leaf_idx;
+        } else {
+            let prev_leaf = leaf_arena.get_mut(prev_leaf_idx);
+            prev_leaf.next = new_leaf_idx;
+        }
+
+        // Update next leaf's prev pointer
+        if next_leaf_idx == crate::constants::EMPTY {
+            // New leaf is now last
+            self.last_leaf_idx = new_leaf_idx;
+        } else {
+            let next_leaf = leaf_arena.get_mut(next_leaf_idx);
+            next_leaf.prev = new_leaf_idx;
+        }
+    }
+
     /// Find previous leaf using trie backtracking.
     ///
     /// Backtracks through the path to find the predecessor leaf.
