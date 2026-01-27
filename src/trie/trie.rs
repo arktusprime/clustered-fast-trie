@@ -339,6 +339,92 @@ impl<K: TrieKey> Trie<K> {
         true
     }
 
+    /// Get the number of keys in the trie.
+    ///
+    /// Returns the count of unique keys stored in the trie.
+    ///
+    /// # Performance
+    /// O(1) - returns cached value
+    ///
+    /// # Example
+    /// ```rust
+    /// use clustered_fast_trie::Trie;
+    ///
+    /// let mut trie = Trie::<u32>::new();
+    /// assert_eq!(trie.len(), 0);
+    /// trie.insert(42);
+    /// assert_eq!(trie.len(), 1);
+    /// ```
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Check if the trie is empty.
+    ///
+    /// Returns `true` if the trie contains no keys.
+    ///
+    /// # Performance
+    /// O(1) - checks cached length
+    ///
+    /// # Example
+    /// ```rust
+    /// use clustered_fast_trie::Trie;
+    ///
+    /// let mut trie = Trie::<u32>::new();
+    /// assert!(trie.is_empty());
+    /// trie.insert(42);
+    /// assert!(!trie.is_empty());
+    /// ```
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Get the minimum key in the trie.
+    ///
+    /// Returns the smallest key stored in the trie, or `None` if empty.
+    ///
+    /// # Performance
+    /// O(1) - returns cached value
+    ///
+    /// # Example
+    /// ```rust
+    /// use clustered_fast_trie::Trie;
+    ///
+    /// let mut trie = Trie::<u32>::new();
+    /// assert_eq!(trie.min(), None);
+    /// trie.insert(42);
+    /// trie.insert(10);
+    /// assert_eq!(trie.min(), Some(10));
+    /// ```
+    #[inline]
+    pub fn min(&self) -> Option<K> {
+        self.min_key
+    }
+
+    /// Get the maximum key in the trie.
+    ///
+    /// Returns the largest key stored in the trie, or `None` if empty.
+    ///
+    /// # Performance
+    /// O(1) - returns cached value
+    ///
+    /// # Example
+    /// ```rust
+    /// use clustered_fast_trie::Trie;
+    ///
+    /// let mut trie = Trie::<u32>::new();
+    /// assert_eq!(trie.max(), None);
+    /// trie.insert(42);
+    /// trie.insert(10);
+    /// assert_eq!(trie.max(), Some(42));
+    /// ```
+    #[inline]
+    pub fn max(&self) -> Option<K> {
+        self.max_key
+    }
+
     /// Ensure root node exists at index 0 in node arena.
     fn ensure_root_node(&mut self, arena_idx: u64) -> u32 {
         let node_arena = self
