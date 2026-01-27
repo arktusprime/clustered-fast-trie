@@ -52,6 +52,12 @@ pub struct Trie<K: TrieKey> {
     /// Cached maximum key for O(1) access
     max_key: Option<K>,
 
+    /// Index of first leaf in linked list (EMPTY if no leaves)
+    first_leaf_idx: u32,
+
+    /// Index of last leaf in linked list (EMPTY if no leaves)
+    last_leaf_idx: u32,
+
     /// Phantom data to associate with key type
     _phantom: core::marker::PhantomData<K>,
 }
@@ -92,6 +98,8 @@ impl<K: TrieKey> Trie<K> {
             len: 0,
             min_key: None,
             max_key: None,
+            first_leaf_idx: crate::constants::EMPTY,
+            last_leaf_idx: crate::constants::EMPTY,
             _phantom: core::marker::PhantomData,
         }
     }
