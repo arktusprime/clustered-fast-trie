@@ -10,7 +10,7 @@ pub struct SegmentHandle {
 
 impl SegmentHandle {
     /// Create a new segment handle
-    pub fn new(segment_id: SegmentId) -> Self {
+    pub fn new(_segment_id: SegmentId) -> Self {
         todo!()
     }
 }

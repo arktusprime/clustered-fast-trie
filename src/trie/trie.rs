@@ -39,10 +39,10 @@ use crate::key::TrieKey;
 pub struct Trie<K: TrieKey> {
     /// Arena allocator for memory management
     allocator: ArenaAllocator,
-    
+
     /// Root segment ID for single-tenant mode
     root_segment: SegmentId,
-    
+
     /// Phantom data to associate with key type
     _phantom: core::marker::PhantomData<K>,
 }
@@ -68,15 +68,15 @@ impl<K: TrieKey> Trie<K> {
     /// ```
     pub fn new() -> Self {
         let mut allocator = ArenaAllocator::new();
-        
+
         // Create root segment covering entire key space for single-tenant mode
         let key_range = KeyRange {
-            start: 0,                    // Start from 0
-            size: K::max_value(),        // Cover full key range
+            start: 0,             // Start from 0
+            size: K::max_value(), // Cover full key range
         };
-        
+
         let root_segment = allocator.create_segment(key_range, 0);
-        
+
         Self {
             allocator,
             root_segment,
@@ -114,7 +114,9 @@ impl<K: TrieKey> Trie<K> {
         }
 
         // Step 2: Get segment metadata
-        let segment_meta = self.allocator.get_segment_meta(self.root_segment)
+        let segment_meta = self
+            .allocator
+            .get_segment_meta(self.root_segment)
             .expect("Segment should exist");
         let arena_idx = segment_meta.cache_key;
 
@@ -130,9 +132,11 @@ impl<K: TrieKey> Trie<K> {
 
     /// Ensure root node exists at index 0 in node arena.
     fn ensure_root_node(&mut self, arena_idx: u32) -> u32 {
-        let node_arena = self.allocator.get_node_arena_mut(arena_idx)
+        let node_arena = self
+            .allocator
+            .get_node_arena_mut(arena_idx)
             .expect("Node arena should be allocated");
-        
+
         if node_arena.is_empty() {
             // Create root node at index 0
             node_arena.alloc()
@@ -143,13 +147,15 @@ impl<K: TrieKey> Trie<K> {
     }
 
     /// Traverse trie levels to find or create leaf.
-    fn traverse_to_leaf(&mut self, key: K, mut current_node_idx: u32, arena_idx: u32) -> u32 {
+    fn traverse_to_leaf(&mut self, key: K, _current_node_idx: u32, arena_idx: u32) -> u32 {
         // For now, simplified: assume we need to create a leaf
         // TODO: Implement full traversal logic
-        
-        let leaf_arena = self.allocator.get_leaf_arena_mut(arena_idx)
+
+        let leaf_arena = self
+            .allocator
+            .get_leaf_arena_mut(arena_idx)
             .expect("Leaf arena should be allocated");
-        
+
         // Create leaf with key prefix
         let prefix = key.prefix().to_u128() as u64;
         leaf_arena.alloc(prefix)
@@ -157,15 +163,18 @@ impl<K: TrieKey> Trie<K> {
 
     /// Set bit in leaf bitmap for the given key.
     fn set_bit_in_leaf(&mut self, key: K, leaf_idx: u32, arena_idx: u32) -> bool {
-        let leaf_arena = self.allocator.get_leaf_arena_mut(arena_idx)
+        use crate::bitmap::test_and_set_bit;
+
+        let leaf_arena = self
+            .allocator
+            .get_leaf_arena_mut(arena_idx)
             .expect("Leaf arena should be allocated");
-        
+
         let leaf = leaf_arena.get_mut(leaf_idx);
         let bit_idx = key.last_byte();
-        
-        // TODO: Use bitmap operations to check and set bit
-        // For now, always return true (new insertion)
-        true
+
+        // Use atomic test-and-set: returns true if bit was NOT set (new insertion)
+        test_and_set_bit(&leaf.bitmap, bit_idx)
     }
 }
 
@@ -182,10 +191,10 @@ mod tests {
     #[test]
     fn test_new_trie_u32() {
         let trie = Trie::<u32>::new();
-        
+
         // Check that allocator has one segment
         assert!(trie.allocator.get_segment_meta(trie.root_segment).is_some());
-        
+
         // Check segment covers full u32 range
         let meta = trie.allocator.get_segment_meta(trie.root_segment).unwrap();
         assert_eq!(meta.key_offset, 0);
@@ -196,10 +205,10 @@ mod tests {
     #[test]
     fn test_new_trie_u64() {
         let trie = Trie::<u64>::new();
-        
+
         // Check that allocator has one segment
         assert!(trie.allocator.get_segment_meta(trie.root_segment).is_some());
-        
+
         // Check segment metadata
         let meta = trie.allocator.get_segment_meta(trie.root_segment).unwrap();
         assert_eq!(meta.key_offset, 0);
@@ -209,10 +218,10 @@ mod tests {
     #[test]
     fn test_new_trie_u128() {
         let trie = Trie::<u128>::new();
-        
+
         // Check that allocator has one segment
         assert!(trie.allocator.get_segment_meta(trie.root_segment).is_some());
-        
+
         // Check segment metadata
         let meta = trie.allocator.get_segment_meta(trie.root_segment).unwrap();
         assert_eq!(meta.key_offset, 0);
@@ -223,7 +232,7 @@ mod tests {
     fn test_default() {
         let trie1 = Trie::<u32>::new();
         let trie2 = Trie::<u32>::default();
-        
+
         // Both should have same structure
         assert_eq!(trie1.root_segment, trie2.root_segment);
     }
@@ -231,7 +240,7 @@ mod tests {
     #[test]
     fn test_insert_basic() {
         let mut trie = Trie::<u32>::new();
-        
+
         // Test basic insertion
         let result = trie.insert(42);
         assert!(result); // Should return true for new key

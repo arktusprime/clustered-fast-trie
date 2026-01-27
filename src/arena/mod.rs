@@ -16,5 +16,4 @@ pub mod segment;
 pub use allocator::ArenaAllocator;
 pub use arena::Arena;
 pub use cache::SegmentCache;
-pub use handle::SegmentHandle;
 pub use segment::{KeyRange, SegmentId, SegmentMeta};

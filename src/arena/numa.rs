@@ -7,7 +7,7 @@ pub struct NumaPool {
 
 impl NumaPool {
     /// Create a new NUMA pool
-    pub fn new(node_id: u8) -> Self {
+    pub fn new(_node_id: u8) -> Self {
         todo!()
     }
 }
