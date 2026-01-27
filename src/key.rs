@@ -67,6 +67,19 @@ pub trait TrieKey: Copy + Eq + Sized {
     /// # Performance
     /// O(1) - compile-time constant
     fn max_value() -> u128;
+
+    /// Get bit shift for arena index calculation.
+    ///
+    /// Determines how many bits to shift right to get arena offset.
+    /// - u32/u64: 32 bits (arena covers 2^32 keys)
+    /// - u128: 64 bits (arena covers 2^64 keys)
+    ///
+    /// # Returns
+    /// Number of bits to shift for arena calculation
+    ///
+    /// # Performance
+    /// O(1) - compile-time constant
+    fn arena_shift() -> u32;
 }
 
 impl TrieKey for u32 {
@@ -97,6 +110,11 @@ impl TrieKey for u32 {
     #[inline(always)]
     fn max_value() -> u128 {
         u32::MAX as u128
+    }
+
+    #[inline(always)]
+    fn arena_shift() -> u32 {
+        32
     }
 }
 
@@ -129,6 +147,11 @@ impl TrieKey for u64 {
     fn max_value() -> u128 {
         u64::MAX as u128
     }
+
+    #[inline(always)]
+    fn arena_shift() -> u32 {
+        32
+    }
 }
 
 impl TrieKey for u128 {
@@ -159,6 +182,11 @@ impl TrieKey for u128 {
     #[inline(always)]
     fn max_value() -> u128 {
         u128::MAX
+    }
+
+    #[inline(always)]
+    fn arena_shift() -> u32 {
+        64
     }
 }
 
