@@ -320,6 +320,119 @@ impl ArenaAllocator {
 
         Ok(())
     }
+
+    /// Allocate a node, reusing from free list if available.
+    ///
+    /// Attempts to reuse a freed node from the free list first.
+    /// If no freed nodes are available, allocates a new node from the arena.
+    ///
+    /// # Arguments
+    /// * `arena_idx` - Arena index (cache_key from SegmentMeta)
+    ///
+    /// # Returns
+    /// u32 - Index of allocated node in the arena
+    ///
+    /// # Performance
+    /// - Free list hit: O(1) - pop from Vec (~2-3 cycles)
+    /// - Free list miss: O(1) - arena allocation (~5-10 cycles)
+    ///
+    /// # Panics
+    /// Panics if arena_idx is out of bounds or arena is not allocated
+    #[inline]
+    pub fn alloc_node(&mut self, arena_idx: u64) -> u32 {
+        let arena_idx_usize = arena_idx as usize;
+
+        // Try to reuse from free list first
+        if let Some(idx) = self.node_free_lists[arena_idx_usize].pop() {
+            return idx;
+        }
+
+        // No free nodes - allocate new one
+        self.node_arenas[arena_idx_usize]
+            .as_mut()
+            .expect("Node arena should be allocated")
+            .alloc()
+    }
+
+    /// Free a node, adding it to the free list for reuse.
+    ///
+    /// Marks the node as freed by adding its index to the free list.
+    /// The node memory is not cleared - it will be overwritten on reuse.
+    ///
+    /// # Arguments
+    /// * `arena_idx` - Arena index (cache_key from SegmentMeta)
+    /// * `node_idx` - Index of node to free
+    ///
+    /// # Performance
+    /// O(1) - push to Vec (~2-3 cycles)
+    ///
+    /// # Note
+    /// The caller is responsible for ensuring the node is actually empty
+    /// and no longer referenced before freeing it.
+    #[inline]
+    pub fn free_node(&mut self, arena_idx: u64, node_idx: u32) {
+        self.node_free_lists[arena_idx as usize].push(node_idx);
+    }
+
+    /// Allocate a leaf, reusing from free list if available.
+    ///
+    /// Attempts to reuse a freed leaf from the free list first.
+    /// If no freed leaves are available, allocates a new leaf from the arena.
+    ///
+    /// # Arguments
+    /// * `arena_idx` - Arena index (cache_key from SegmentMeta)
+    /// * `prefix` - 56-bit prefix for the leaf (upper bits of keys)
+    ///
+    /// # Returns
+    /// u32 - Index of allocated leaf in the arena
+    ///
+    /// # Performance
+    /// - Free list hit: O(1) - pop from Vec (~2-3 cycles)
+    /// - Free list miss: O(1) - arena allocation (~5-10 cycles)
+    ///
+    /// # Panics
+    /// Panics if arena_idx is out of bounds or arena is not allocated
+    #[inline]
+    pub fn alloc_leaf(&mut self, arena_idx: u64, prefix: u64) -> u32 {
+        let arena_idx_usize = arena_idx as usize;
+
+        // Try to reuse from free list first
+        if let Some(idx) = self.leaf_free_lists[arena_idx_usize].pop() {
+            // Reinitialize the leaf with new prefix
+            let leaf_arena = self.leaf_arenas[arena_idx_usize]
+                .as_mut()
+                .expect("Leaf arena should be allocated");
+            let leaf = leaf_arena.get_mut(idx);
+            *leaf = crate::trie::Leaf::new(prefix);
+            return idx;
+        }
+
+        // No free leaves - allocate new one
+        self.leaf_arenas[arena_idx_usize]
+            .as_mut()
+            .expect("Leaf arena should be allocated")
+            .alloc(prefix)
+    }
+
+    /// Free a leaf, adding it to the free list for reuse.
+    ///
+    /// Marks the leaf as freed by adding its index to the free list.
+    /// The leaf memory is not cleared - it will be reinitialized on reuse.
+    ///
+    /// # Arguments
+    /// * `arena_idx` - Arena index (cache_key from SegmentMeta)
+    /// * `leaf_idx` - Index of leaf to free
+    ///
+    /// # Performance
+    /// O(1) - push to Vec (~2-3 cycles)
+    ///
+    /// # Note
+    /// The caller is responsible for ensuring the leaf is actually empty
+    /// and no longer referenced before freeing it.
+    #[inline]
+    pub fn free_leaf(&mut self, arena_idx: u64, leaf_idx: u32) {
+        self.leaf_free_lists[arena_idx as usize].push(leaf_idx);
+    }
 }
 
 #[cfg(test)]
