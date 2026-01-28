@@ -556,14 +556,14 @@ impl<K: TrieKey> Trie<K> {
         }
 
         // Traverse to leaf containing key's prefix (save path for backtracking)
-        let mut path: [(u32, u8); 16] = [(0, 0); 16];
+        let mut path: [(u32, u8, u64); 16] = [(0, 0, 0); 16];
         let mut path_len = 0;
         let mut current_node_idx = 0; // Start at root
 
         // Traverse internal levels (0..K::LEVELS-1)
         for level in 0..(K::LEVELS - 1) {
             let byte = key.byte_at(level);
-            path[path_len] = (current_node_idx, byte);
+            path[path_len] = (current_node_idx, byte, current_arena_idx);
             path_len += 1;
 
             // Get current node arena (may have changed at split level)
@@ -593,7 +593,7 @@ impl<K: TrieKey> Trie<K> {
 
         // Final level: check if leaf exists
         let last_node_byte = key.byte_at(K::LEVELS - 1);
-        path[path_len] = (current_node_idx, last_node_byte);
+        path[path_len] = (current_node_idx, last_node_byte, current_arena_idx);
         path_len += 1;
 
         let node_arena = self.allocator.get_node_arena(current_arena_idx)?;
@@ -677,14 +677,14 @@ impl<K: TrieKey> Trie<K> {
     fn successor_backtrack(
         &self,
         key: K,
-        path: &[(u32, u8)],
+        path: &[(u32, u8, u64)],
         path_len: usize,
         arena_idx: u64,
     ) -> Option<K> {
         use crate::trie::{unpack_link, EMPTY_LINK};
 
         // Find next leaf using backtracking
-        let next_link = self.find_next_leaf(path, path_len, arena_idx);
+        let next_link = self.find_next_leaf(path, path_len);
 
         if next_link == EMPTY_LINK {
             return None;
@@ -766,14 +766,14 @@ impl<K: TrieKey> Trie<K> {
         }
 
         // Traverse to leaf containing key's prefix (save path for backtracking)
-        let mut path: [(u32, u8); 16] = [(0, 0); 16];
+        let mut path: [(u32, u8, u64); 16] = [(0, 0, 0); 16];
         let mut path_len = 0;
         let mut current_node_idx = 0; // Start at root
 
         // Traverse internal levels (0..K::LEVELS-1)
         for level in 0..(K::LEVELS - 1) {
             let byte = key.byte_at(level);
-            path[path_len] = (current_node_idx, byte);
+            path[path_len] = (current_node_idx, byte, current_arena_idx);
             path_len += 1;
 
             // Get current node arena (may have changed at split level)
@@ -803,7 +803,7 @@ impl<K: TrieKey> Trie<K> {
 
         // Final level: check if leaf exists
         let last_node_byte = key.byte_at(K::LEVELS - 1);
-        path[path_len] = (current_node_idx, last_node_byte);
+        path[path_len] = (current_node_idx, last_node_byte, current_arena_idx);
         path_len += 1;
 
         let node_arena = self.allocator.get_node_arena(current_arena_idx)?;
@@ -887,14 +887,14 @@ impl<K: TrieKey> Trie<K> {
     fn predecessor_backtrack(
         &self,
         key: K,
-        path: &[(u32, u8)],
+        path: &[(u32, u8, u64)],
         path_len: usize,
         arena_idx: u64,
     ) -> Option<K> {
         use crate::trie::{unpack_link, EMPTY_LINK};
 
         // Find prev leaf using backtracking
-        let prev_link = self.find_prev_leaf(path, path_len, arena_idx);
+        let prev_link = self.find_prev_leaf(path, path_len);
 
         if prev_link == EMPTY_LINK {
             return None;
@@ -1151,10 +1151,10 @@ impl<K: TrieKey> Trie<K> {
         key: K,
         mut current_node_idx: u32,
         mut current_arena_idx: u64,
-    ) -> (u32, [(u32, u8); 16], usize, u64) {
-        // Path tracking: (node_idx, byte) for each level
+    ) -> (u32, [(u32, u8, u64); 16], usize, u64) {
+        // Path tracking: (node_idx, byte, arena_idx) for each level
         // Max 16 levels for u128 (0..15)
-        let mut path = [(0u32, 0u8); 16];
+        let mut path = [(0u32, 0u8, 0u64); 16];
         let mut path_len = 0;
 
         // Traverse internal levels (0..K::LEVELS-1)
@@ -1162,8 +1162,8 @@ impl<K: TrieKey> Trie<K> {
         for level in 0..(K::LEVELS - 1) {
             let byte = key.byte_at(level);
 
-            // Record current node and byte in path
-            path[path_len] = (current_node_idx, byte);
+            // Record current node, byte, and arena in path
+            path[path_len] = (current_node_idx, byte, current_arena_idx);
             path_len += 1;
 
             // Check if child exists (read-only operation)
@@ -1253,8 +1253,8 @@ impl<K: TrieKey> Trie<K> {
         // Final level (K::LEVELS - 1): transition from Node to Leaf
         let last_node_byte = key.byte_at(K::LEVELS - 1);
 
-        // Record final node and byte in path
-        path[path_len] = (current_node_idx, last_node_byte);
+        // Record final node, byte, and arena in path
+        path[path_len] = (current_node_idx, last_node_byte, current_arena_idx);
         path_len += 1;
 
         // Check if leaf exists (read-only operation)
@@ -1432,7 +1432,7 @@ impl<K: TrieKey> Trie<K> {
     ///
     /// # Arguments
     /// * `new_leaf_idx` - Index of the newly created leaf
-    /// * `path` - Array of (node_idx, byte) pairs from root to leaf
+    /// * `path` - Array of (node_idx, byte, arena_idx) tuples from root to leaf
     /// * `path_len` - Number of valid entries in path
     /// * `arena_idx` - Arena index for storage
     ///
@@ -1441,7 +1441,7 @@ impl<K: TrieKey> Trie<K> {
     fn link_leaf(
         &mut self,
         new_leaf_idx: u32,
-        path: &[(u32, u8)],
+        path: &[(u32, u8, u64)],
         path_len: usize,
         arena_idx: u64,
     ) {
@@ -1458,8 +1458,8 @@ impl<K: TrieKey> Trie<K> {
         }
 
         // Find prev/next leaves using trie backtracking
-        let prev_link = self.find_prev_leaf(path, path_len, arena_idx);
-        let next_link = self.find_next_leaf(path, path_len, arena_idx);
+        let prev_link = self.find_prev_leaf(path, path_len);
+        let next_link = self.find_next_leaf(path, path_len);
 
         // Get leaf arena for updates
         let leaf_arena = self
@@ -1510,26 +1510,25 @@ impl<K: TrieKey> Trie<K> {
     /// descends to the maximum leaf in that branch.
     ///
     /// # Arguments
-    /// * `path` - Array of (node_idx, byte) pairs from root to current position
+    /// * `path` - Array of (node_idx, byte, arena_idx) tuples from root to current position
     /// * `path_len` - Number of valid entries in path
-    /// * `arena_idx` - Arena index for storage
     ///
     /// # Returns
     /// Packed link (arena_idx << 32 | leaf_idx) of the previous leaf, or EMPTY_LINK if none exists
     ///
     /// # Performance
     /// O(log log U) - backtracks at most K::LEVELS levels, supports cross-arena navigation
-    fn find_prev_leaf(&self, path: &[(u32, u8)], path_len: usize, arena_idx: u64) -> u64 {
+    fn find_prev_leaf(&self, path: &[(u32, u8, u64)], path_len: usize) -> u64 {
         use crate::trie::EMPTY_LINK;
-
-        let node_arena = match self.allocator.get_node_arena(arena_idx) {
-            Some(arena) => arena,
-            None => return EMPTY_LINK,
-        };
 
         // Backtrack through path to find predecessor branch
         for i in (0..path_len).rev() {
-            let (node_idx, byte) = path[i];
+            let (node_idx, byte, arena_idx) = path[i];
+            
+            let node_arena = match self.allocator.get_node_arena(arena_idx) {
+                Some(arena) => arena,
+                None => continue,
+            };
             let node = node_arena.get(node_idx);
 
             // Check if there's a predecessor child at this level
@@ -1551,26 +1550,25 @@ impl<K: TrieKey> Trie<K> {
     /// descends to the minimum leaf in that branch.
     ///
     /// # Arguments
-    /// * `path` - Array of (node_idx, byte) pairs from root to current position
+    /// * `path` - Array of (node_idx, byte, arena_idx) tuples from root to current position
     /// * `path_len` - Number of valid entries in path
-    /// * `arena_idx` - Arena index for storage
     ///
     /// # Returns
     /// Packed link (arena_idx << 32 | leaf_idx) of the next leaf, or EMPTY_LINK if none exists
     ///
     /// # Performance
     /// O(log log U) - backtracks at most K::LEVELS levels, supports cross-arena navigation
-    fn find_next_leaf(&self, path: &[(u32, u8)], path_len: usize, arena_idx: u64) -> u64 {
+    fn find_next_leaf(&self, path: &[(u32, u8, u64)], path_len: usize) -> u64 {
         use crate::trie::EMPTY_LINK;
-
-        let node_arena = match self.allocator.get_node_arena(arena_idx) {
-            Some(arena) => arena,
-            None => return EMPTY_LINK,
-        };
 
         // Backtrack through path to find successor branch
         for i in (0..path_len).rev() {
-            let (node_idx, byte) = path[i];
+            let (node_idx, byte, arena_idx) = path[i];
+            
+            let node_arena = match self.allocator.get_node_arena(arena_idx) {
+                Some(arena) => arena,
+                None => continue,
+            };
             let node = node_arena.get(node_idx);
 
             // Check if there's a successor child at this level
