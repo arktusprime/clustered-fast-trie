@@ -12,6 +12,21 @@ pub trait TrieKey: Copy + Eq + PartialOrd + Sized {
     /// - u128: 15 levels (16 bytes, last byte in leaf)
     const LEVELS: usize;
 
+    /// Arena split levels for hierarchical arena allocation.
+    ///
+    /// Defines at which levels to create separate arenas for better cache locality.
+    /// Nodes at these levels store child_arena_idx for their subtrees.
+    ///
+    /// - u32: &[] (no splits, single arena)
+    /// - u64: &[4] (split at level 4: levels 0-3 in root, 4-7 in child arenas)
+    /// - u128: &[4, 12] (splits at levels 4 and 12: three-level hierarchy)
+    ///
+    /// # Rationale
+    /// - Root arena (levels 0-3): always hot in cache, ~256-65K nodes
+    /// - Child arenas: created lazily per key prefix, sparse allocation
+    /// - Each split reduces arena size by factor of 256^4 = 4B
+    const SPLIT_LEVELS: &'static [usize];
+
     /// Extract byte at given level using big-endian ordering.
     ///
     /// # Arguments
@@ -113,6 +128,7 @@ pub trait TrieKey: Copy + Eq + PartialOrd + Sized {
 
 impl TrieKey for u32 {
     const LEVELS: usize = 3;
+    const SPLIT_LEVELS: &'static [usize] = &[];
 
     #[inline(always)]
     fn byte_at(self, level: usize) -> u8 {
@@ -160,6 +176,7 @@ impl TrieKey for u32 {
 
 impl TrieKey for u64 {
     const LEVELS: usize = 7;
+    const SPLIT_LEVELS: &'static [usize] = &[4];
 
     #[inline(always)]
     fn byte_at(self, level: usize) -> u8 {
@@ -207,6 +224,7 @@ impl TrieKey for u64 {
 
 impl TrieKey for u128 {
     const LEVELS: usize = 15;
+    const SPLIT_LEVELS: &'static [usize] = &[4, 12];
 
     #[inline(always)]
     fn byte_at(self, level: usize) -> u8 {
