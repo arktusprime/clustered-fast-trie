@@ -600,12 +600,6 @@ mod tests {
         // Check segment ID
         assert_eq!(segment_id, 0);
 
-        // Check vectors grew
-        assert_eq!(allocator.segments.len(), 1);
-        assert_eq!(allocator.segment_caches.len(), 1);
-        assert_eq!(allocator.node_arenas.len(), 1);
-        assert_eq!(allocator.leaf_arenas.len(), 1);
-
         // Check segment metadata
         let segment_meta = allocator.segments[0].as_ref().unwrap();
         assert_eq!(segment_meta.cache_key, 0);
@@ -615,9 +609,8 @@ mod tests {
         // Check segment cache exists
         assert!(allocator.segment_caches[0].is_some());
 
-        // Check arenas are reserved but not allocated (lazy allocation)
-        assert!(allocator.node_arenas[0].is_none());
-        assert!(allocator.leaf_arenas[0].is_none());
+        // Note: arenas are allocated lazily via allocate_arena_for_key()
+        // sparse/dense mapping is independent of segment_id
     }
 
     #[test]
@@ -798,11 +791,11 @@ mod tests {
         let meta = allocator.get_segment_meta(segment_id).unwrap();
         let arena_idx = meta.cache_key;
 
-        // Arena should be reserved but not allocated (lazy allocation)
+        // Arena should not exist yet (lazy allocation)
         assert!(allocator.get_node_arena(arena_idx).is_none());
 
-        // Manually allocate arena for testing
-        allocator.node_arenas[arena_idx as usize] = Some(Arena::new());
+        // Allocate arena using proper method
+        allocator.allocate_arena_for_key(arena_idx);
 
         // Now arena should exist
         let arena = allocator.get_node_arena(arena_idx).unwrap();
@@ -813,7 +806,7 @@ mod tests {
     fn test_get_node_arena_mut() {
         let mut allocator = ArenaAllocator::new();
 
-        // Create segment and manually allocate arena
+        // Create segment and allocate arena
         let segment_id = allocator.create_segment(
             KeyRange {
                 start: 2000,
@@ -824,7 +817,8 @@ mod tests {
         let meta = allocator.get_segment_meta(segment_id).unwrap();
         let arena_idx = meta.cache_key;
 
-        allocator.node_arenas[arena_idx as usize] = Some(Arena::with_capacity(10));
+        // Allocate arena using proper method
+        allocator.allocate_arena_for_key(arena_idx);
 
         // Test mutable access
         {
@@ -858,11 +852,11 @@ mod tests {
         let meta = allocator.get_segment_meta(segment_id).unwrap();
         let arena_idx = meta.cache_key;
 
-        // Arena should be reserved but not allocated
+        // Arena should not exist yet (lazy allocation)
         assert!(allocator.get_leaf_arena(arena_idx).is_none());
 
-        // Manually allocate arena
-        allocator.leaf_arenas[arena_idx as usize] = Some(Arena::new());
+        // Allocate arena using proper method
+        allocator.allocate_arena_for_key(arena_idx);
 
         // Now arena should exist
         let arena = allocator.get_leaf_arena(arena_idx).unwrap();
@@ -873,7 +867,7 @@ mod tests {
     fn test_get_leaf_arena_mut() {
         let mut allocator = ArenaAllocator::new();
 
-        // Create segment and manually allocate arena
+        // Create segment and allocate arena
         let segment_id = allocator.create_segment(
             KeyRange {
                 start: 4000,
@@ -884,7 +878,8 @@ mod tests {
         let meta = allocator.get_segment_meta(segment_id).unwrap();
         let arena_idx = meta.cache_key;
 
-        allocator.leaf_arenas[arena_idx as usize] = Some(Arena::with_capacity(5));
+        // Allocate arena using proper method
+        allocator.allocate_arena_for_key(arena_idx);
 
         // Test mutable access
         {
