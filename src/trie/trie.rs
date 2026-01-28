@@ -1187,56 +1187,75 @@ impl<K: TrieKey> Trie<K> {
 
                 // Check if we need to switch arena at split level
                 if K::SPLIT_LEVELS.contains(&(level + 1)) {
-                    // Next level is a split level - get child_arena_idx from current node
-                    let node_arena = self
-                        .allocator
-                        .get_node_arena(current_arena_idx)
-                        .expect("Node arena should be allocated");
-                    let current_node = node_arena.get(current_node_idx);
-                    current_arena_idx = current_node.child_arena_idx as u64;
+                    // Next level is a split level - get or set child_arena_idx
+                    let child_arena_idx = {
+                        let node_arena = self
+                            .allocator
+                            .get_node_arena(current_arena_idx)
+                            .expect("Node arena should be allocated");
+                        let current_node = node_arena.get(current_node_idx);
+                        current_node.child_arena_idx as u64
+                    };
+
+                    // If child_arena_idx is 0, it means this node was created before
+                    // we set it properly - compute and set it now
+                    if child_arena_idx == 0 {
+                        let computed_arena_idx = key.arena_idx_at_level(level + 1);
+                        
+                        // Allocate child arena if not exists
+                        if !self.allocator.has_arena(computed_arena_idx) {
+                            self.allocator.allocate_arena_for_key(computed_arena_idx);
+                        }
+
+                        // Set child_arena_idx in the node
+                        let node_arena = self
+                            .allocator
+                            .get_node_arena_mut(current_arena_idx)
+                            .expect("Node arena should be allocated");
+                        let current_node = node_arena.get_mut(current_node_idx);
+                        current_node.child_arena_idx = computed_arena_idx as u32;
+                        
+                        current_arena_idx = computed_arena_idx;
+                    } else {
+                        current_arena_idx = child_arena_idx;
+                    }
                 }
             } else {
                 // Child doesn't exist - create new node and link it
 
-                // Allocate new node
+                // Check if next level is a split level
+                let is_split_level = K::SPLIT_LEVELS.contains(&(level + 1));
+                let child_arena_idx = if is_split_level {
+                    let arena_idx = key.arena_idx_at_level(level + 1);
+                    // Allocate child arena if not exists
+                    if !self.allocator.has_arena(arena_idx) {
+                        self.allocator.allocate_arena_for_key(arena_idx);
+                    }
+                    arena_idx
+                } else {
+                    current_arena_idx
+                };
+
+                // Allocate new node in child arena
                 let new_node_idx = {
                     let node_arena = self
                         .allocator
-                        .get_node_arena_mut(current_arena_idx)
+                        .get_node_arena_mut(child_arena_idx)
                         .expect("Node arena should be allocated");
                     node_arena.alloc()
                 };
 
-                // Set parent_idx and child_arena_idx for the new node
+                // Set parent_idx for the new node
                 {
                     let node_arena = self
                         .allocator
-                        .get_node_arena_mut(current_arena_idx)
+                        .get_node_arena_mut(child_arena_idx)
                         .expect("Node arena should be allocated");
                     let new_node = node_arena.get_mut(new_node_idx);
                     new_node.parent_idx = current_node_idx;
                 }
 
-                // If next level is a split level, allocate child arena
-                if K::SPLIT_LEVELS.contains(&(level + 1)) {
-                    let child_arena_idx = key.arena_idx_at_level(level + 1);
-
-                    // Allocate child arena if not exists
-                    if !self.allocator.has_arena(child_arena_idx) {
-                        self.allocator.allocate_arena_for_key(child_arena_idx);
-                    }
-
-                    // Set child_arena_idx in the new node
-                    let node_arena = self
-                        .allocator
-                        .get_node_arena_mut(current_arena_idx)
-                        .expect("Node arena should be allocated");
-                    let new_node = node_arena.get_mut(new_node_idx);
-                    new_node.child_arena_idx = child_arena_idx as u32;
-                    current_arena_idx = child_arena_idx;
-                }
-
-                // Link from parent to child
+                // Link from parent to child and set child_arena_idx if needed
                 {
                     let node_arena = self
                         .allocator
@@ -1244,9 +1263,16 @@ impl<K: TrieKey> Trie<K> {
                         .expect("Node arena should be allocated");
                     let current_node = node_arena.get_mut(current_node_idx);
                     current_node.set_child(byte, new_node_idx);
+                    
+                    // If split level, store child_arena_idx in parent node
+                    if is_split_level {
+                        current_node.child_arena_idx = child_arena_idx as u32;
+                    }
                 }
 
+                // Move to new node
                 current_node_idx = new_node_idx;
+                current_arena_idx = child_arena_idx;
             }
         }
 
