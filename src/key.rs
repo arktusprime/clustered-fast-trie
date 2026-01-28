@@ -318,18 +318,20 @@ impl TrieKey for u128 {
     fn arena_idx_at_level(self, level: usize) -> u64 {
         // u128: splits at levels 4 and 12
         // Levels 0-3: root arena (0)
-        // Levels 4-11: L1 child arena (bytes 0-3 of key)
+        // Levels 4-11: L1 child arena (bytes 4-7 of key)
         // Levels 12-15: L2 child arena (bytes 0-11 of key)
         if level < 4 {
             0
         } else if level < 12 {
-            // Extract bytes 0-3 (upper 4 bytes of lower 64 bits)
-            ((self >> 32) & 0xFFFFFFFF) as u64
+            // Extract bytes 4-7 (middle 4 bytes)
+            // Key: [bytes 0-3][bytes 4-7][bytes 8-11][bytes 12-15]
+            // Shift right by 64 bits to get upper half, then take lower 32 bits
+            ((self >> 64) & 0xFFFFFFFF) as u64
         } else {
             // Extract bytes 0-11 (upper 12 bytes)
-            // This is: (upper 8 bytes << 32) | (next 4 bytes)
-            let upper = (self >> 64) as u64;
-            let mid = ((self >> 32) & 0xFFFFFFFF) as u64;
+            // This is: (bytes 0-7 << 32) | (bytes 8-11)
+            let upper = (self >> 64) as u64;  // bytes 0-7
+            let mid = ((self >> 32) & 0xFFFFFFFF) as u64;  // bytes 8-11
             (upper << 32) | mid
         }
     }
