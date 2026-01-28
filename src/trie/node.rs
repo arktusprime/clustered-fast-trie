@@ -2,6 +2,8 @@
 
 use crate::atomic::{AtomicU64, Ordering};
 use crate::constants::EMPTY;
+use crate::trie::ChildArenas;
+use alloc::boxed::Box;
 
 /// Internal node with 256-way branching.
 ///
@@ -11,8 +13,9 @@ use crate::constants::EMPTY;
 /// - `seq`: 8 bytes - sequence counter for seqlock
 /// - `bitmap`: 32 bytes (256 bits = 4 × u64) - child existence bitmap
 /// - `parent_idx`: 4 bytes - index of parent node (for cleanup)
-/// - `child_arena_idx`: 4 bytes - arena index for children (hierarchical arenas)
-/// - `_pad`: 16 bytes padding - completes cache line 0
+/// - `child_arena_idx`: 4 bytes - DEPRECATED (will be removed)
+/// - `_pad`: 8 bytes padding - completes cache line 0
+/// - `child_arenas`: 8 bytes - pointer to child arenas (only at split levels)
 /// - `children`: 1024 bytes (256 × u32) - cache lines 1-16
 /// - Total: 1088 bytes per node (17 cache lines)
 ///
@@ -22,8 +25,9 @@ use crate::constants::EMPTY;
 /// - Children array starts at cache line boundary
 ///
 /// # Hierarchical Arenas
-/// - Nodes at split levels store child_arena_idx for their subtrees
-/// - Enables sparse allocation and better cache locality
+/// - Nodes at split levels own child arenas via `child_arenas` field
+/// - Enables O(1) arena access without global lookup
+/// - Automatic cleanup when node is dropped
 /// - Split levels: u32=none, u64=[4], u128=[4,12]
 ///
 /// # Performance
@@ -31,7 +35,7 @@ use crate::constants::EMPTY;
 /// - Existence check: O(1) via bitmap
 /// - Min/max child: O(1) via bitmap intrinsics (TZCNT/LZCNT)
 /// - Parent access: O(1) via parent_idx (for cleanup)
-/// - Arena switch: O(1) via child_arena_idx at split levels
+/// - Arena access: O(1) via child_arenas pointer at split levels
 ///
 /// # Concurrency
 /// - Seq counter for seqlock protocol (bulk operations)
@@ -59,22 +63,25 @@ pub struct Node {
     /// Root node (index 0) has parent_idx = 0 (points to itself).
     pub parent_idx: u32,
 
-    /// Arena index for children of this node.
+    /// DEPRECATED: Arena index for children of this node.
     ///
-    /// Used for hierarchical arena allocation at split levels.
-    /// - Nodes at split levels: contains actual child arena index
-    /// - Other nodes: value is ignored (can be 0 or inherited)
-    ///
-    /// Split levels by key type:
-    /// - u32: no splits (always 0)
-    /// - u64: split at level 4
-    /// - u128: splits at levels 4 and 12
+    /// This field is deprecated and will be removed.
+    /// Use `child_arenas` instead for hierarchical arena allocation.
     pub child_arena_idx: u32,
 
-    /// Padding to align children to cache line boundary.
+    /// Padding to align child_arenas to 8-byte boundary.
+    pub(crate) _pad: u64,
+
+    /// Child arenas for this node's subtree (only at split levels).
     ///
-    /// Ensures seq + bitmap + parent_idx + child_arena_idx occupy exactly one cache line (64 bytes).
-    pub(crate) _pad: [u64; 2],
+    /// - None: not a split level node, children in same arena as parent
+    /// - Some: split level node, owns arenas for entire subtree
+    ///
+    /// Split levels by key type:
+    /// - u32: no splits (always None)
+    /// - u64: split at level 4 (Some at level 3 nodes)
+    /// - u128: splits at levels 4 and 12 (Some at level 3 and 11 nodes)
+    pub child_arenas: Option<Box<ChildArenas>>,
 
     /// Direct-indexed children array.
     ///
@@ -88,7 +95,8 @@ impl Node {
     ///
     /// All children are initialized to `EMPTY` (u32::MAX).
     /// Parent index is initialized to 0 (will be set during insertion).
-    /// Child arena index is initialized to 0 (will be set at split levels).
+    /// Child arena index is initialized to 0 (deprecated field).
+    /// Child arenas is None (will be set at split levels).
     ///
     /// # Performance
     /// O(1) - uses array initialization
@@ -106,7 +114,8 @@ impl Node {
             ],
             parent_idx: 0,
             child_arena_idx: 0,
-            _pad: [0; 2],
+            _pad: 0,
+            child_arenas: None,
             children: [EMPTY; 256],
         }
     }
@@ -131,6 +140,7 @@ impl Clone for Node {
             parent_idx: self.parent_idx,
             child_arena_idx: self.child_arena_idx,
             _pad: self._pad,
+            child_arenas: None, // Don't clone arenas - they're owned by original node
             children: self.children,
         }
     }
@@ -164,12 +174,14 @@ mod tests {
         use core::mem::{align_of, size_of};
 
         // Verify expected memory layout with cache line alignment
-        assert_eq!(size_of::<Node>(), 1088); // 8 + 32 + 4 + 4 + 16 + 1024 = 1088 bytes
+        // 8 (seq) + 32 (bitmap) + 4 (parent_idx) + 4 (child_arena_idx) + 8 (_pad) + 8 (child_arenas ptr) + 1024 (children) = 1088 bytes
+        assert_eq!(size_of::<Node>(), 1088);
         assert_eq!(align_of::<Node>(), 64); // Aligned to cache line
         assert_eq!(size_of::<AtomicU64>(), 8);
         assert_eq!(size_of::<[AtomicU64; 4]>(), 32);
         assert_eq!(size_of::<u32>(), 4);
-        assert_eq!(size_of::<[u64; 2]>(), 16);
+        assert_eq!(size_of::<u64>(), 8);
+        assert_eq!(size_of::<Option<Box<ChildArenas>>>(), 8);
         assert_eq!(size_of::<[u32; 256]>(), 1024);
     }
 
