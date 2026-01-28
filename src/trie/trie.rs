@@ -931,12 +931,12 @@ impl<K: TrieKey> Trie<K> {
     /// # Returns
     /// Minimum key in the trie, or None if empty
     fn find_min(&self) -> Option<K> {
-        // Get segment metadata
+        // Get root arena
         let segment_meta = self.allocator.get_segment_meta(self.root_segment)?;
-        let arena_idx = segment_meta.cache_key;
+        let mut current_arena_idx = segment_meta.cache_key;
 
         // Get node arena
-        let node_arena = self.allocator.get_node_arena(arena_idx)?;
+        let node_arena = self.allocator.get_node_arena(current_arena_idx)?;
         if node_arena.is_empty() {
             return None;
         }
@@ -947,6 +947,8 @@ impl<K: TrieKey> Trie<K> {
 
         // Traverse internal levels (0..K::LEVELS-1)
         for level in 0..(K::LEVELS - 1) {
+            // Get current node arena (may have changed at split level)
+            let node_arena = self.allocator.get_node_arena(current_arena_idx)?;
             let node = node_arena.get(current_node_idx);
             let min_byte = node.min_child()?;
 
@@ -955,9 +957,23 @@ impl<K: TrieKey> Trie<K> {
 
             // Move to child node
             current_node_idx = node.get_child(min_byte);
+
+            // Check if we need to switch arenas at split level
+            if K::SPLIT_LEVELS.contains(&level) {
+                // Get child arena index from current node
+                let child_arena_idx = node.child_arena_idx as u64;
+                
+                // Check if child arena exists
+                if !self.allocator.has_arena(child_arena_idx) {
+                    return None; // Child arena not allocated
+                }
+                
+                current_arena_idx = child_arena_idx;
+            }
         }
 
         // Final level: find minimum child (leaf)
+        let node_arena = self.allocator.get_node_arena(current_arena_idx)?;
         let final_node = node_arena.get(current_node_idx);
         let min_leaf_byte = final_node.min_child()?;
         key_value |= (min_leaf_byte as u128) << 8;
@@ -965,7 +981,7 @@ impl<K: TrieKey> Trie<K> {
         let leaf_idx = final_node.get_child(min_leaf_byte);
 
         // Get leaf arena and find minimum bit
-        let leaf_arena = self.allocator.get_leaf_arena(arena_idx)?;
+        let leaf_arena = self.allocator.get_leaf_arena(current_arena_idx)?;
         let leaf = leaf_arena.get(leaf_idx);
         let min_bit = crate::bitmap::min_bit(&leaf.bitmap)?;
 
@@ -986,12 +1002,12 @@ impl<K: TrieKey> Trie<K> {
     /// # Returns
     /// Maximum key in the trie, or None if empty
     fn find_max(&self) -> Option<K> {
-        // Get segment metadata
+        // Get root arena
         let segment_meta = self.allocator.get_segment_meta(self.root_segment)?;
-        let arena_idx = segment_meta.cache_key;
+        let mut current_arena_idx = segment_meta.cache_key;
 
         // Get node arena
-        let node_arena = self.allocator.get_node_arena(arena_idx)?;
+        let node_arena = self.allocator.get_node_arena(current_arena_idx)?;
         if node_arena.is_empty() {
             return None;
         }
@@ -1002,6 +1018,8 @@ impl<K: TrieKey> Trie<K> {
 
         // Traverse internal levels (0..K::LEVELS-1)
         for level in 0..(K::LEVELS - 1) {
+            // Get current node arena (may have changed at split level)
+            let node_arena = self.allocator.get_node_arena(current_arena_idx)?;
             let node = node_arena.get(current_node_idx);
             let max_byte = node.max_child()?;
 
@@ -1010,9 +1028,23 @@ impl<K: TrieKey> Trie<K> {
 
             // Move to child node
             current_node_idx = node.get_child(max_byte);
+
+            // Check if we need to switch arenas at split level
+            if K::SPLIT_LEVELS.contains(&level) {
+                // Get child arena index from current node
+                let child_arena_idx = node.child_arena_idx as u64;
+                
+                // Check if child arena exists
+                if !self.allocator.has_arena(child_arena_idx) {
+                    return None; // Child arena not allocated
+                }
+                
+                current_arena_idx = child_arena_idx;
+            }
         }
 
         // Final level: find maximum child (leaf)
+        let node_arena = self.allocator.get_node_arena(current_arena_idx)?;
         let final_node = node_arena.get(current_node_idx);
         let max_leaf_byte = final_node.max_child()?;
         key_value |= (max_leaf_byte as u128) << 8;
@@ -1020,7 +1052,7 @@ impl<K: TrieKey> Trie<K> {
         let leaf_idx = final_node.get_child(max_leaf_byte);
 
         // Get leaf arena and find maximum bit
-        let leaf_arena = self.allocator.get_leaf_arena(arena_idx)?;
+        let leaf_arena = self.allocator.get_leaf_arena(current_arena_idx)?;
         let leaf = leaf_arena.get(leaf_idx);
         let max_bit = crate::bitmap::max_bit(&leaf.bitmap)?;
 
