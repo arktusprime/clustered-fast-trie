@@ -150,7 +150,6 @@ pub trait TrieKey: Copy + Eq + PartialOrd + Sized {
     ///
     /// # Performance
     /// O(1) - compile-time specialized per key type, always inlined
-    #[inline(always)]
     fn arena_idx_at_level(self, level: usize) -> u64;
 }
 

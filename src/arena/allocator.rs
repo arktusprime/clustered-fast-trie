@@ -304,7 +304,7 @@ impl ArenaAllocator {
     /// # Performance
     /// O(1) - two Vec lookups with bounds checks
     #[inline]
-    fn has_arena(&self, arena_idx: u64) -> bool {
+    pub fn has_arena(&self, arena_idx: u64) -> bool {
         let sparse_idx = arena_idx as usize;
 
         // Check if arena_idx is within sparse bounds
@@ -359,7 +359,7 @@ impl ArenaAllocator {
     /// - Sparse grows to arena_idx + 1 (lazy, only used indices)
     /// - Dense grows by 1 (compact, no gaps)
     /// - Arenas grow by 1 each (node + leaf)
-    fn allocate_arena_for_key(&mut self, arena_idx: u64) -> usize {
+    pub fn allocate_arena_for_key(&mut self, arena_idx: u64) -> usize {
         // Check if already allocated
         if let Some(cache_idx) = self.get_cache_idx(arena_idx) {
             return cache_idx;

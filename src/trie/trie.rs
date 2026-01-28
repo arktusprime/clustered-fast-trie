@@ -144,7 +144,8 @@ impl<K: TrieKey> Trie<K> {
         let root_node_idx = self.ensure_root_node(arena_idx);
 
         // Step 4: Traverse trie levels to find/create path to leaf
-        let (leaf_idx, _path, _path_len) = self.traverse_to_leaf(key, root_node_idx, arena_idx);
+        let (leaf_idx, _path, _path_len, arena_idx) =
+            self.traverse_to_leaf(key, root_node_idx, arena_idx);
 
         // Step 5: Set bit in leaf bitmap
         let was_new = self.set_bit_in_leaf(key, leaf_idx, arena_idx);
@@ -1073,16 +1074,25 @@ impl<K: TrieKey> Trie<K> {
                 }
             } else {
                 // Child doesn't exist - create new node and link it
-                let node_arena = self
-                    .allocator
-                    .get_node_arena_mut(current_arena_idx)
-                    .expect("Node arena should be allocated");
+                
+                // Allocate new node
+                let new_node_idx = {
+                    let node_arena = self
+                        .allocator
+                        .get_node_arena_mut(current_arena_idx)
+                        .expect("Node arena should be allocated");
+                    node_arena.alloc()
+                };
 
-                let new_node_idx = node_arena.alloc();
-
-                // Set parent_idx for the new node
-                let new_node = node_arena.get_mut(new_node_idx);
-                new_node.parent_idx = current_node_idx;
+                // Set parent_idx and child_arena_idx for the new node
+                {
+                    let node_arena = self
+                        .allocator
+                        .get_node_arena_mut(current_arena_idx)
+                        .expect("Node arena should be allocated");
+                    let new_node = node_arena.get_mut(new_node_idx);
+                    new_node.parent_idx = current_node_idx;
+                }
 
                 // If next level is a split level, allocate child arena
                 if K::SPLIT_LEVELS.contains(&(level + 1)) {
@@ -1093,14 +1103,25 @@ impl<K: TrieKey> Trie<K> {
                         self.allocator.allocate_arena_for_key(child_arena_idx);
                     }
                     
-                    // Store child_arena_idx in the new node
+                    // Set child_arena_idx in the new node
+                    let node_arena = self
+                        .allocator
+                        .get_node_arena_mut(current_arena_idx)
+                        .expect("Node arena should be allocated");
+                    let new_node = node_arena.get_mut(new_node_idx);
                     new_node.child_arena_idx = child_arena_idx as u32;
                     current_arena_idx = child_arena_idx;
                 }
 
                 // Link from parent to child
-                let current_node = node_arena.get_mut(current_node_idx);
-                current_node.set_child(byte, new_node_idx);
+                {
+                    let node_arena = self
+                        .allocator
+                        .get_node_arena_mut(current_arena_idx)
+                        .expect("Node arena should be allocated");
+                    let current_node = node_arena.get_mut(current_node_idx);
+                    current_node.set_child(byte, new_node_idx);
+                }
 
                 current_node_idx = new_node_idx;
             }
