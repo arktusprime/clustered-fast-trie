@@ -95,6 +95,20 @@ pub trait TrieKey: Copy + Eq + PartialOrd + Sized {
     /// # Performance
     /// O(1) - compile-time constant
     fn arena_shift() -> u32;
+
+    /// Calculate arena index from key.
+    ///
+    /// Determines which arena this key belongs to based on key prefix.
+    /// - u32: always 0 (single arena per segment)
+    /// - u64: upper 4 bytes (2^32 possible arenas)
+    /// - u128: upper 8 bytes (2^64 possible arenas)
+    ///
+    /// # Returns
+    /// Arena index (u64) for sparse arena allocation
+    ///
+    /// # Performance
+    /// O(1) - single shift operation
+    fn arena_idx(self) -> u64;
 }
 
 impl TrieKey for u32 {
@@ -135,6 +149,12 @@ impl TrieKey for u32 {
     #[inline(always)]
     fn arena_shift() -> u32 {
         32
+    }
+
+    #[inline(always)]
+    fn arena_idx(self) -> u64 {
+        // u32: single arena per segment
+        0
     }
 }
 
@@ -177,6 +197,12 @@ impl TrieKey for u64 {
     fn arena_shift() -> u32 {
         32
     }
+
+    #[inline(always)]
+    fn arena_idx(self) -> u64 {
+        // u64: upper 4 bytes as arena index
+        (self >> 32) as u64
+    }
 }
 
 impl TrieKey for u128 {
@@ -217,6 +243,12 @@ impl TrieKey for u128 {
     #[inline(always)]
     fn arena_shift() -> u32 {
         64
+    }
+
+    #[inline(always)]
+    fn arena_idx(self) -> u64 {
+        // u128: upper 8 bytes as arena index
+        (self >> 64) as u64
     }
 }
 
@@ -296,5 +328,43 @@ mod tests {
         assert_eq!(u32::LEVELS, 3);
         assert_eq!(u64::LEVELS, 7);
         assert_eq!(u128::LEVELS, 15);
+    }
+
+    #[test]
+    fn test_u32_arena_idx() {
+        // u32: always returns 0
+        assert_eq!(0u32.arena_idx(), 0);
+        assert_eq!(u32::MAX.arena_idx(), 0);
+        assert_eq!(0x12345678u32.arena_idx(), 0);
+    }
+
+    #[test]
+    fn test_u64_arena_idx() {
+        // u64: upper 4 bytes
+        assert_eq!(0x0000000000000000u64.arena_idx(), 0x00000000);
+        assert_eq!(0x0000000100000000u64.arena_idx(), 0x00000001);
+        assert_eq!(0x123456789ABCDEFu64.arena_idx(), 0x01234567);
+        assert_eq!(0xFFFFFFFF00000000u64.arena_idx(), 0xFFFFFFFF);
+    }
+
+    #[test]
+    fn test_u128_arena_idx() {
+        // u128: upper 8 bytes
+        assert_eq!(
+            0x00000000000000000000000000000000u128.arena_idx(),
+            0x0000000000000000
+        );
+        assert_eq!(
+            0x00000000000000010000000000000000u128.arena_idx(),
+            0x0000000000000001
+        );
+        assert_eq!(
+            0x0102030405060708090A0B0C0D0E0F10u128.arena_idx(),
+            0x0102030405060708
+        );
+        assert_eq!(
+            0xFFFFFFFFFFFFFFFF0000000000000000u128.arena_idx(),
+            0xFFFFFFFFFFFFFFFF
+        );
     }
 }

@@ -617,7 +617,7 @@ impl<K: TrieKey> Trie<K> {
     ) -> Option<K> {
         // Find next leaf using backtracking
         let next_leaf_idx = self.find_next_leaf(path, path_len, arena_idx);
-        
+
         if next_leaf_idx == crate::constants::EMPTY {
             return None;
         }
@@ -625,7 +625,7 @@ impl<K: TrieKey> Trie<K> {
         // Get minimum key from next leaf
         let leaf_arena = self.allocator.get_leaf_arena(arena_idx)?;
         let next_leaf = leaf_arena.get(next_leaf_idx);
-        
+
         if let Some(min_bit) = crate::bitmap::min_bit(&next_leaf.bitmap) {
             let mut key_value = (next_leaf.prefix as u128) << 8;
             key_value |= min_bit as u128;
@@ -804,7 +804,7 @@ impl<K: TrieKey> Trie<K> {
     ) -> Option<K> {
         // Find prev leaf using backtracking
         let prev_leaf_idx = self.find_prev_leaf(path, path_len, arena_idx);
-        
+
         if prev_leaf_idx == crate::constants::EMPTY {
             return None;
         }
@@ -812,7 +812,7 @@ impl<K: TrieKey> Trie<K> {
         // Get maximum key from prev leaf
         let leaf_arena = self.allocator.get_leaf_arena(arena_idx)?;
         let prev_leaf = leaf_arena.get(prev_leaf_idx);
-        
+
         if let Some(max_bit) = crate::bitmap::max_bit(&prev_leaf.bitmap) {
             let mut key_value = (prev_leaf.prefix as u128) << 8;
             key_value |= max_bit as u128;
@@ -1257,7 +1257,13 @@ impl<K: TrieKey> Trie<K> {
     ///
     /// # Performance
     /// O(log log U) - uses trie structure to find neighbors efficiently
-    fn link_leaf(&mut self, new_leaf_idx: u32, path: &[(u32, u8)], path_len: usize, arena_idx: u64) {
+    fn link_leaf(
+        &mut self,
+        new_leaf_idx: u32,
+        path: &[(u32, u8)],
+        path_len: usize,
+        arena_idx: u64,
+    ) {
         // Check if this is the first leaf
         if self.first_leaf_idx == crate::constants::EMPTY {
             // First leaf ever - initialize list
