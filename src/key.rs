@@ -124,6 +124,34 @@ pub trait TrieKey: Copy + Eq + PartialOrd + Sized {
     /// # Performance
     /// O(1) - single shift operation
     fn arena_idx(self) -> u64;
+
+    /// Calculate arena index for key at specific trie level.
+    ///
+    /// Used for hierarchical arena allocation with split levels.
+    /// Returns arena index based on key prefix up to the given level.
+    ///
+    /// # Arguments
+    /// * `level` - Trie level (0 to LEVELS-1)
+    ///
+    /// # Returns
+    /// Arena index for nodes at this level
+    ///
+    /// # Behavior by Level
+    /// - Before first split: returns 0 (root arena)
+    /// - At/after split: returns arena_idx based on key prefix
+    ///
+    /// # Examples
+    /// ```text
+    /// u64 key = 0x1234567890ABCDEF, SPLIT_LEVELS = [4]
+    ///
+    /// level 0-3: arena_idx_at_level(key, 0-3) = 0 (root arena)
+    /// level 4-7: arena_idx_at_level(key, 4-7) = 0x12345678 (upper 4 bytes)
+    /// ```
+    ///
+    /// # Performance
+    /// O(1) - compile-time specialized per key type, always inlined
+    #[inline(always)]
+    fn arena_idx_at_level(self, level: usize) -> u64;
 }
 
 impl TrieKey for u32 {
@@ -170,6 +198,12 @@ impl TrieKey for u32 {
     #[inline(always)]
     fn arena_idx(self) -> u64 {
         // u32: single arena per segment
+        0
+    }
+
+    #[inline(always)]
+    fn arena_idx_at_level(self, _level: usize) -> u64 {
+        // u32: no splits, always root arena
         0
     }
 }
@@ -220,6 +254,18 @@ impl TrieKey for u64 {
         // u64: upper 4 bytes as arena index
         (self >> 32) as u64
     }
+
+    #[inline(always)]
+    fn arena_idx_at_level(self, level: usize) -> u64 {
+        // u64: split at level 4
+        // Levels 0-3: root arena (0)
+        // Levels 4-7: child arena (upper 4 bytes)
+        if level < 4 {
+            0
+        } else {
+            self >> 32
+        }
+    }
 }
 
 impl TrieKey for u128 {
@@ -267,6 +313,26 @@ impl TrieKey for u128 {
     fn arena_idx(self) -> u64 {
         // u128: upper 8 bytes as arena index
         (self >> 64) as u64
+    }
+
+    #[inline(always)]
+    fn arena_idx_at_level(self, level: usize) -> u64 {
+        // u128: splits at levels 4 and 12
+        // Levels 0-3: root arena (0)
+        // Levels 4-11: L1 child arena (bytes 0-3 of key)
+        // Levels 12-15: L2 child arena (bytes 0-11 of key)
+        if level < 4 {
+            0
+        } else if level < 12 {
+            // Extract bytes 0-3 (upper 4 bytes of lower 64 bits)
+            ((self >> 32) & 0xFFFFFFFF) as u64
+        } else {
+            // Extract bytes 0-11 (upper 12 bytes)
+            // This is: (upper 8 bytes << 32) | (next 4 bytes)
+            let upper = (self >> 64) as u64;
+            let mid = ((self >> 32) & 0xFFFFFFFF) as u64;
+            (upper << 32) | mid
+        }
     }
 }
 
@@ -384,5 +450,56 @@ mod tests {
             0xFFFFFFFFFFFFFFFF0000000000000000u128.arena_idx(),
             0xFFFFFFFFFFFFFFFF
         );
+    }
+
+    #[test]
+    fn test_u32_arena_idx_at_level() {
+        let key = 0x12345678u32;
+        // u32: no splits, always 0
+        assert_eq!(key.arena_idx_at_level(0), 0);
+        assert_eq!(key.arena_idx_at_level(1), 0);
+        assert_eq!(key.arena_idx_at_level(2), 0);
+    }
+
+    #[test]
+    fn test_u64_arena_idx_at_level() {
+        let key = 0x123456789ABCDEFu64;
+
+        // Levels 0-3: root arena
+        assert_eq!(key.arena_idx_at_level(0), 0);
+        assert_eq!(key.arena_idx_at_level(1), 0);
+        assert_eq!(key.arena_idx_at_level(2), 0);
+        assert_eq!(key.arena_idx_at_level(3), 0);
+
+        // Levels 4-7: child arena (upper 4 bytes)
+        assert_eq!(key.arena_idx_at_level(4), 0x01234567);
+        assert_eq!(key.arena_idx_at_level(5), 0x01234567);
+        assert_eq!(key.arena_idx_at_level(6), 0x01234567);
+    }
+
+    #[test]
+    fn test_u128_arena_idx_at_level() {
+        let key = 0x0102030405060708090A0B0C0D0E0F10u128;
+
+        // Levels 0-3: root arena
+        assert_eq!(key.arena_idx_at_level(0), 0);
+        assert_eq!(key.arena_idx_at_level(1), 0);
+        assert_eq!(key.arena_idx_at_level(2), 0);
+        assert_eq!(key.arena_idx_at_level(3), 0);
+
+        // Levels 4-11: L1 child arena (bytes 4-7 of key)
+        // Key bytes: 01 02 03 04 | 05 06 07 08 | 09 0A 0B 0C | 0D 0E 0F 10
+        //            [0-3]        [4-7]        [8-11]       [12-15]
+        // Bytes 4-7 = 0x05060708
+        assert_eq!(key.arena_idx_at_level(4), 0x05060708);
+        assert_eq!(key.arena_idx_at_level(5), 0x05060708);
+        assert_eq!(key.arena_idx_at_level(11), 0x05060708);
+
+        // Levels 12-15: L2 child arena (bytes 0-11)
+        // Bytes 0-11 = 0x010203040506070809 0A0B0C
+        let expected = (0x0102030405060708u64 << 32) | 0x090A0B0Cu64;
+        assert_eq!(key.arena_idx_at_level(12), expected);
+        assert_eq!(key.arena_idx_at_level(13), expected);
+        assert_eq!(key.arena_idx_at_level(14), expected);
     }
 }
