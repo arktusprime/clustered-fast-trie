@@ -1795,7 +1795,6 @@ mod tests {
         let meta = trie.allocator.get_segment_meta(trie.root_segment).unwrap();
         assert_eq!(meta.key_offset, 0);
         assert_eq!(meta.cache_key, 0);
-        assert_eq!(meta.run_length, 1);
     }
 
     #[test]

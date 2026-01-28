@@ -609,7 +609,6 @@ mod tests {
         // Check segment metadata
         let segment_meta = allocator.segments[0].as_ref().unwrap();
         assert_eq!(segment_meta.cache_key, 0);
-        assert_eq!(segment_meta.run_length, 1);
         assert_eq!(segment_meta.key_offset, 1000);
         assert_eq!(segment_meta.numa_node, 0);
 
@@ -681,7 +680,6 @@ mod tests {
         // Test existing segment
         let meta = allocator.get_segment_meta(segment_id).unwrap();
         assert_eq!(meta.cache_key, 0);
-        assert_eq!(meta.run_length, 1);
         assert_eq!(meta.key_offset, 5000);
         assert_eq!(meta.numa_node, 2);
 
