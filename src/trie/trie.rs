@@ -1253,6 +1253,14 @@ impl<K: TrieKey> Trie<K> {
                         .expect("Node arena should be allocated");
                     let new_node = node_arena.get_mut(new_node_idx);
                     new_node.parent_idx = current_node_idx;
+                    
+                    // If the new node is at a level where its children will be in a different arena,
+                    // set its child_arena_idx now
+                    if K::SPLIT_LEVELS.contains(&(level + 2)) {
+                        // Next level after new node is a split level
+                        let next_child_arena_idx = key.arena_idx_at_level(level + 2);
+                        new_node.child_arena_idx = next_child_arena_idx as u32;
+                    }
                 }
 
                 // Link from parent to child and set child_arena_idx if needed
