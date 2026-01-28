@@ -637,8 +637,9 @@ mod tests {
 
         assert_eq!(allocator.segments.len(), 2);
         assert_eq!(allocator.segment_caches.len(), 2);
-        assert_eq!(allocator.node_arenas.len(), 2);
-        assert_eq!(allocator.leaf_arenas.len(), 2);
+
+        // Note: node_arenas and leaf_arenas use sparse/dense mapping
+        // Their length is independent of segment count
 
         // Check first segment
         let meta1 = allocator.segments[0].as_ref().unwrap();

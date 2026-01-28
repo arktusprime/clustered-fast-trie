@@ -2001,7 +2001,7 @@ mod tests {
     fn test_multi_level_structure_u64() {
         let mut trie = Trie::<u64>::new();
 
-        // For u64, we have 8 levels (0-7)
+        // For u64, we have 8 levels (0-7) with split at level 4
         // Insert keys that differ at different levels
 
         let key1 = 0x0102030405060708u64;
@@ -2021,22 +2021,22 @@ mod tests {
         assert!(trie.contains(key3));
         assert!(trie.contains(key4));
 
-        // Get arena index
-        let segment_meta = trie.allocator.get_segment_meta(trie.root_segment).unwrap();
-        let arena_idx = segment_meta.cache_key;
+        // For u64 with split at level 4, these keys create child arena
+        // Child arena index = upper 4 bytes = 0x01020304
+        let child_arena_idx = 0x01020304u64;
 
-        // Check that node arena has multiple nodes
-        let node_arena = trie.allocator.get_node_arena(arena_idx).unwrap();
+        // Check that child arena exists and has nodes
+        let node_arena = trie.allocator.get_node_arena(child_arena_idx).unwrap();
         assert!(
             node_arena.len() > 1,
-            "Should have multiple nodes for u64 keys"
+            "Should have multiple nodes in child arena for u64 keys"
         );
 
-        // Check that leaf arena has multiple leaves
-        let leaf_arena = trie.allocator.get_leaf_arena(arena_idx).unwrap();
+        // Check that child arena has multiple leaves
+        let leaf_arena = trie.allocator.get_leaf_arena(child_arena_idx).unwrap();
         assert!(
             leaf_arena.len() >= 2,
-            "Should have multiple leaves for different prefixes"
+            "Should have multiple leaves in child arena for different prefixes"
         );
     }
 
@@ -2125,7 +2125,7 @@ mod tests {
     fn test_u128_multi_level() {
         let mut trie = Trie::<u128>::new();
 
-        // For u128, we have 16 levels (0-15)
+        // For u128, we have 16 levels (0-15) with splits at levels 4 and 12
         // Insert keys that differ at various levels
 
         let key1 = 0x0102030405060708090A0B0C0D0E0F10u128;
@@ -2141,19 +2141,20 @@ mod tests {
         assert!(trie.contains(key2));
         assert!(trie.contains(key3));
 
-        // Get arena index
-        let segment_meta = trie.allocator.get_segment_meta(trie.root_segment).unwrap();
-        let arena_idx = segment_meta.cache_key;
+        // For u128 with splits at levels 4 and 12, these keys create L2 child arena
+        // Keys differ at bytes 14-15, so they're at levels 12-15
+        // L2 child arena index = bytes 0-11 = 0x0102030405060708090A0B0C
+        let child_arena_idx = (0x0102030405060708u64 << 32) | 0x090A0B0Cu64;
 
-        // Check that structures were created
-        let node_arena = trie.allocator.get_node_arena(arena_idx).unwrap();
+        // Check that child arena exists and has structures
+        let node_arena = trie.allocator.get_node_arena(child_arena_idx).unwrap();
         assert!(
             node_arena.len() > 1,
-            "Should have multiple nodes for u128 keys"
+            "Should have multiple nodes in L2 child arena for u128 keys"
         );
 
-        let leaf_arena = trie.allocator.get_leaf_arena(arena_idx).unwrap();
-        assert!(leaf_arena.len() >= 1, "Should have at least one leaf");
+        let leaf_arena = trie.allocator.get_leaf_arena(child_arena_idx).unwrap();
+        assert!(leaf_arena.len() >= 1, "Should have at least one leaf in L2 child arena");
     }
 
     #[test]
