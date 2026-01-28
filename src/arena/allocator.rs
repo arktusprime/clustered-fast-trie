@@ -12,16 +12,24 @@ use alloc::vec::Vec;
 /// # Architecture
 /// - segments: Vec<Option<SegmentMeta>> - segment metadata indexed by perm_key
 /// - segment_caches: Vec<Option<SegmentCache>> - per-segment hot path caches
-/// - node_arenas: Vec<Option<Arena<Node>>> - internal node storage
-/// - leaf_arenas: Vec<Option<Arena<Leaf>>> - leaf node storage
+/// - sparse: Vec<u64> - sparse-to-dense mapping (arena_idx -> cache_idx)
+/// - dense: Vec<u64> - dense-to-sparse mapping (cache_idx -> arena_idx)
+/// - node_arenas: Vec<Arena<Node>> - internal node storage (dense array)
+/// - leaf_arenas: Vec<Arena<Leaf>> - leaf node storage (dense array)
 /// - node_free_lists: Vec<Vec<u32>> - free node indices for reuse
 /// - leaf_free_lists: Vec<Vec<u32>> - free leaf indices for reuse
 ///
 /// # Memory Layout
 /// - Lazy allocation: segments, arenas, nodes/leaves created on-demand
+/// - Sparse arena allocation: arenas created only for used key ranges
 /// - Per-segment isolation: each segment has own arena range
 /// - Cache locality: related data stored in same arena
 /// - Free list reuse: deleted nodes/leaves are recycled via free lists
+///
+/// # Sparse/Dense Mapping
+/// - sparse[arena_idx] = cache_idx (O(1) lookup from key to dense array)
+/// - dense[cache_idx] = arena_idx (O(1) reverse lookup for swap-remove)
+/// - Validation: sparse[arena_idx] < dense.len() && dense[sparse[arena_idx]] == arena_idx
 #[derive(Debug)]
 pub struct ArenaAllocator {
     /// Segment metadata indexed by permanent key (perm_key).
@@ -32,22 +40,32 @@ pub struct ArenaAllocator {
     /// Parallel to segments Vec, same indexing by perm_key.
     segment_caches: Vec<Option<SegmentCache>>,
 
-    /// Internal node arenas for trie structure.
-    /// Indexed by cache_key from SegmentMeta.
-    node_arenas: Vec<Option<Arena<Node>>>,
+    /// Sparse-to-dense mapping for arena allocation.
+    /// sparse[arena_idx] = cache_idx (position in dense arrays).
+    /// u64::MAX = arena not allocated.
+    sparse: Vec<u64>,
 
-    /// Leaf node arenas for bitmap storage.
-    /// Indexed by cache_key from SegmentMeta.
-    leaf_arenas: Vec<Option<Arena<Leaf>>>,
+    /// Dense-to-sparse mapping for arena deallocation.
+    /// dense[cache_idx] = arena_idx (original arena index).
+    /// Used for O(1) swap-remove updates.
+    dense: Vec<u64>,
+
+    /// Internal node arenas for trie structure (dense array).
+    /// Indexed by cache_idx from sparse mapping.
+    node_arenas: Vec<Arena<Node>>,
+
+    /// Leaf node arenas for bitmap storage (dense array).
+    /// Indexed by cache_idx from sparse mapping.
+    leaf_arenas: Vec<Arena<Leaf>>,
 
     /// Free lists for node reuse (parallel to node_arenas).
     /// Each Vec<u32> contains indices of freed nodes in corresponding arena.
-    /// Indexed by cache_key from SegmentMeta.
+    /// Indexed by cache_idx from sparse mapping.
     node_free_lists: Vec<Vec<u32>>,
 
     /// Free lists for leaf reuse (parallel to leaf_arenas).
     /// Each Vec<u32> contains indices of freed leaves in corresponding arena.
-    /// Indexed by cache_key from SegmentMeta.
+    /// Indexed by cache_idx from sparse mapping.
     leaf_free_lists: Vec<Vec<u32>>,
 }
 
@@ -61,11 +79,13 @@ impl ArenaAllocator {
     /// O(1) - creates empty vectors with zero allocations
     ///
     /// # Memory Usage
-    /// ~144 bytes (6 empty Vec headers × 24 bytes each)
+    /// ~192 bytes (8 empty Vec headers × 24 bytes each)
     pub fn new() -> Self {
         Self {
             segments: Vec::new(),
             segment_caches: Vec::new(),
+            sparse: Vec::new(),
+            dense: Vec::new(),
             node_arenas: Vec::new(),
             leaf_arenas: Vec::new(),
             node_free_lists: Vec::new(),
@@ -91,8 +111,9 @@ impl ArenaAllocator {
     /// # Memory Usage
     /// ~200 bytes per segment (SegmentMeta + SegmentCache + Vec overhead)
     pub fn create_segment(&mut self, key_range: KeyRange, numa_node: u8) -> SegmentId {
-        // Calculate cache_key (physical position in arena Vec)
-        let cache_key = self.node_arenas.len() as u64;
+        // Calculate cache_key (will be used as arena_idx later)
+        // For now, use segment count as base arena index
+        let cache_key = self.segments.len() as u64;
 
         // Calculate run_length (number of arenas needed for this key range)
         // For now, allocate 1 arena - will expand as needed
@@ -116,13 +137,8 @@ impl ArenaAllocator {
         self.segments.push(Some(segment_meta));
         self.segment_caches.push(Some(segment_cache));
 
-        // Reserve arena slots (but don't allocate yet - lazy allocation)
-        self.node_arenas.push(None);
-        self.leaf_arenas.push(None);
-
-        // Reserve free list slots (empty initially)
-        self.node_free_lists.push(Vec::new());
-        self.leaf_free_lists.push(Vec::new());
+        // Note: Arenas are NOT pre-allocated - they will be created lazily
+        // via allocate_arena_for_key() when first key is inserted
 
         segment_id
     }
@@ -206,77 +222,214 @@ impl ArenaAllocator {
     /// Get node arena by arena index.
     ///
     /// Returns reference to node arena for trie traversal and operations.
-    /// Arena may be None if not yet allocated (lazy allocation).
+    /// Uses sparse/dense mapping for O(1) access.
     ///
     /// # Arguments
-    /// * `arena_idx` - Arena index (cache_key from SegmentMeta)
+    /// * `arena_idx` - Arena index from key (via TrieKey::arena_idx())
     ///
     /// # Returns
     /// Option<&Arena<Node>> - Some if arena exists, None if not allocated
     ///
     /// # Performance
-    /// O(1) - direct Vec indexing
+    /// O(1) - sparse lookup + dense array access
     pub fn get_node_arena(&self, arena_idx: u64) -> Option<&Arena<Node>> {
-        self.node_arenas
-            .get(arena_idx as usize)
-            .and_then(|opt| opt.as_ref())
+        self.get_cache_idx(arena_idx)
+            .map(|cache_idx| &self.node_arenas[cache_idx])
     }
 
     /// Get mutable node arena by arena index.
     ///
     /// Returns mutable reference to node arena for modifications.
-    /// Arena may be None if not yet allocated (lazy allocation).
+    /// Uses sparse/dense mapping for O(1) access.
     ///
     /// # Arguments
-    /// * `arena_idx` - Arena index (cache_key from SegmentMeta)
+    /// * `arena_idx` - Arena index from key (via TrieKey::arena_idx())
     ///
     /// # Returns
     /// Option<&mut Arena<Node>> - Some if arena exists, None if not allocated
     ///
     /// # Performance
-    /// O(1) - direct Vec indexing
+    /// O(1) - sparse lookup + dense array access
     pub fn get_node_arena_mut(&mut self, arena_idx: u64) -> Option<&mut Arena<Node>> {
-        self.node_arenas
-            .get_mut(arena_idx as usize)
-            .and_then(|opt| opt.as_mut())
+        self.get_cache_idx(arena_idx)
+            .map(|cache_idx| &mut self.node_arenas[cache_idx])
     }
 
     /// Get leaf arena by arena index.
     ///
     /// Returns reference to leaf arena for bitmap operations.
-    /// Arena may be None if not yet allocated (lazy allocation).
+    /// Uses sparse/dense mapping for O(1) access.
     ///
     /// # Arguments
-    /// * `arena_idx` - Arena index (cache_key from SegmentMeta)
+    /// * `arena_idx` - Arena index from key (via TrieKey::arena_idx())
     ///
     /// # Returns
     /// Option<&Arena<Leaf>> - Some if arena exists, None if not allocated
     ///
     /// # Performance
-    /// O(1) - direct Vec indexing
+    /// O(1) - sparse lookup + dense array access
     pub fn get_leaf_arena(&self, arena_idx: u64) -> Option<&Arena<Leaf>> {
-        self.leaf_arenas
-            .get(arena_idx as usize)
-            .and_then(|opt| opt.as_ref())
+        self.get_cache_idx(arena_idx)
+            .map(|cache_idx| &self.leaf_arenas[cache_idx])
     }
 
     /// Get mutable leaf arena by arena index.
     ///
     /// Returns mutable reference to leaf arena for modifications.
-    /// Arena may be None if not yet allocated (lazy allocation).
+    /// Uses sparse/dense mapping for O(1) access.
     ///
     /// # Arguments
-    /// * `arena_idx` - Arena index (cache_key from SegmentMeta)
+    /// * `arena_idx` - Arena index from key (via TrieKey::arena_idx())
     ///
     /// # Returns
     /// Option<&mut Arena<Leaf>> - Some if arena exists, None if not allocated
     ///
     /// # Performance
-    /// O(1) - direct Vec indexing
+    /// O(1) - sparse lookup + dense array access
     pub fn get_leaf_arena_mut(&mut self, arena_idx: u64) -> Option<&mut Arena<Leaf>> {
-        self.leaf_arenas
-            .get_mut(arena_idx as usize)
-            .and_then(|opt| opt.as_mut())
+        self.get_cache_idx(arena_idx)
+            .map(|cache_idx| &mut self.leaf_arenas[cache_idx])
+    }
+
+    /// Check if arena exists for given arena index.
+    ///
+    /// Uses sparse/dense mapping for O(1) validation.
+    ///
+    /// # Arguments
+    /// * `arena_idx` - Arena index from key (via TrieKey::arena_idx())
+    ///
+    /// # Returns
+    /// bool - true if arena is allocated, false otherwise
+    ///
+    /// # Performance
+    /// O(1) - two Vec lookups with bounds checks
+    #[inline]
+    fn has_arena(&self, arena_idx: u64) -> bool {
+        let sparse_idx = arena_idx as usize;
+
+        // Check if arena_idx is within sparse bounds
+        if sparse_idx >= self.sparse.len() {
+            return false;
+        }
+
+        let cache_idx = self.sparse[sparse_idx];
+
+        // Validate: cache_idx must be valid and point back to arena_idx
+        cache_idx != u64::MAX
+            && (cache_idx as usize) < self.dense.len()
+            && self.dense[cache_idx as usize] == arena_idx
+    }
+
+    /// Get cache index for arena index.
+    ///
+    /// Translates sparse arena_idx to dense cache_idx for array access.
+    ///
+    /// # Arguments
+    /// * `arena_idx` - Arena index from key (via TrieKey::arena_idx())
+    ///
+    /// # Returns
+    /// Option<usize> - Some(cache_idx) if arena exists, None otherwise
+    ///
+    /// # Performance
+    /// O(1) - single Vec lookup with validation
+    #[inline]
+    fn get_cache_idx(&self, arena_idx: u64) -> Option<usize> {
+        if self.has_arena(arena_idx) {
+            Some(self.sparse[arena_idx as usize] as usize)
+        } else {
+            None
+        }
+    }
+
+    /// Allocate arena for given arena index if not exists.
+    ///
+    /// Creates new arena in dense arrays and updates sparse/dense mappings.
+    /// Idempotent - safe to call multiple times for same arena_idx.
+    ///
+    /// # Arguments
+    /// * `arena_idx` - Arena index from key (via TrieKey::arena_idx())
+    ///
+    /// # Returns
+    /// usize - cache_idx for accessing dense arrays
+    ///
+    /// # Performance
+    /// O(1) - Vec push and sparse resize if needed
+    ///
+    /// # Memory
+    /// - Sparse grows to arena_idx + 1 (lazy, only used indices)
+    /// - Dense grows by 1 (compact, no gaps)
+    /// - Arenas grow by 1 each (node + leaf)
+    fn allocate_arena_for_key(&mut self, arena_idx: u64) -> usize {
+        // Check if already allocated
+        if let Some(cache_idx) = self.get_cache_idx(arena_idx) {
+            return cache_idx;
+        }
+
+        // Allocate new arena at end of dense arrays
+        let cache_idx = self.dense.len();
+
+        // Expand sparse if needed
+        let sparse_idx = arena_idx as usize;
+        if sparse_idx >= self.sparse.len() {
+            self.sparse.resize(sparse_idx + 1, u64::MAX);
+        }
+
+        // Update mappings
+        self.sparse[sparse_idx] = cache_idx as u64;
+        self.dense.push(arena_idx);
+
+        // Allocate arenas
+        self.node_arenas.push(Arena::new());
+        self.leaf_arenas.push(Arena::new());
+        self.node_free_lists.push(Vec::new());
+        self.leaf_free_lists.push(Vec::new());
+
+        cache_idx
+    }
+
+    /// Deallocate arena for given arena index.
+    ///
+    /// Removes arena from dense arrays using swap-remove and updates mappings.
+    /// Should be called when last key in arena range is removed.
+    ///
+    /// # Arguments
+    /// * `arena_idx` - Arena index to deallocate
+    ///
+    /// # Performance
+    /// O(1) - swap-remove with mapping updates
+    ///
+    /// # Panics
+    /// Panics if arena_idx is not allocated
+    fn deallocate_arena(&mut self, arena_idx: u64) {
+        let cache_idx = self
+            .get_cache_idx(arena_idx)
+            .expect("Arena must be allocated to deallocate");
+
+        let last_idx = self.dense.len() - 1;
+
+        // If not last element, swap with last
+        if cache_idx != last_idx {
+            // Swap in all parallel arrays
+            self.dense.swap(cache_idx, last_idx);
+            self.node_arenas.swap(cache_idx, last_idx);
+            self.leaf_arenas.swap(cache_idx, last_idx);
+            self.node_free_lists.swap(cache_idx, last_idx);
+            self.leaf_free_lists.swap(cache_idx, last_idx);
+
+            // Update sparse mapping for moved arena
+            let moved_arena_idx = self.dense[cache_idx];
+            self.sparse[moved_arena_idx as usize] = cache_idx as u64;
+        }
+
+        // Remove last element
+        self.dense.pop();
+        self.node_arenas.pop();
+        self.leaf_arenas.pop();
+        self.node_free_lists.pop();
+        self.leaf_free_lists.pop();
+
+        // Mark as deallocated in sparse
+        self.sparse[arena_idx as usize] = u64::MAX;
     }
 
     /// Allocate node and leaf arenas for a segment if not already allocated.
@@ -291,7 +444,7 @@ impl ArenaAllocator {
     /// Result<(), &'static str> - Ok if successful, Err with message if failed
     ///
     /// # Performance
-    /// O(1) - direct Vec indexing and arena creation
+    /// O(1) - sparse/dense mapping with arena creation
     ///
     /// # Memory Usage
     /// Allocates empty arenas (~24 bytes each) that grow as nodes/leaves are added
@@ -301,22 +454,10 @@ impl ArenaAllocator {
             .get_segment_meta(segment_id)
             .ok_or("Segment not found")?;
 
-        let arena_idx = segment_meta.cache_key as usize;
+        let arena_idx = segment_meta.cache_key;
 
-        // Ensure vectors are large enough
-        if arena_idx >= self.node_arenas.len() {
-            return Err("Arena index out of bounds");
-        }
-
-        // Allocate node arena if not exists
-        if self.node_arenas[arena_idx].is_none() {
-            self.node_arenas[arena_idx] = Some(Arena::new());
-        }
-
-        // Allocate leaf arena if not exists
-        if self.leaf_arenas[arena_idx].is_none() {
-            self.leaf_arenas[arena_idx] = Some(Arena::new());
-        }
+        // Allocate arena using sparse/dense mapping
+        self.allocate_arena_for_key(arena_idx);
 
         Ok(())
     }
@@ -327,7 +468,7 @@ impl ArenaAllocator {
     /// If no freed nodes are available, allocates a new node from the arena.
     ///
     /// # Arguments
-    /// * `arena_idx` - Arena index (cache_key from SegmentMeta)
+    /// * `arena_idx` - Arena index from key (via TrieKey::arena_idx())
     ///
     /// # Returns
     /// u32 - Index of allocated node in the arena
@@ -337,21 +478,20 @@ impl ArenaAllocator {
     /// - Free list miss: O(1) - arena allocation (~5-10 cycles)
     ///
     /// # Panics
-    /// Panics if arena_idx is out of bounds or arena is not allocated
+    /// Panics if arena_idx is not allocated
     #[inline]
     pub fn alloc_node(&mut self, arena_idx: u64) -> u32 {
-        let arena_idx_usize = arena_idx as usize;
+        let cache_idx = self
+            .get_cache_idx(arena_idx)
+            .expect("Arena must be allocated before alloc_node");
 
         // Try to reuse from free list first
-        if let Some(idx) = self.node_free_lists[arena_idx_usize].pop() {
+        if let Some(idx) = self.node_free_lists[cache_idx].pop() {
             return idx;
         }
 
         // No free nodes - allocate new one
-        self.node_arenas[arena_idx_usize]
-            .as_mut()
-            .expect("Node arena should be allocated")
-            .alloc()
+        self.node_arenas[cache_idx].alloc()
     }
 
     /// Free a node, adding it to the free list for reuse.
@@ -360,7 +500,7 @@ impl ArenaAllocator {
     /// The node memory is not cleared - it will be overwritten on reuse.
     ///
     /// # Arguments
-    /// * `arena_idx` - Arena index (cache_key from SegmentMeta)
+    /// * `arena_idx` - Arena index from key (via TrieKey::arena_idx())
     /// * `node_idx` - Index of node to free
     ///
     /// # Performance
@@ -371,7 +511,10 @@ impl ArenaAllocator {
     /// and no longer referenced before freeing it.
     #[inline]
     pub fn free_node(&mut self, arena_idx: u64, node_idx: u32) {
-        self.node_free_lists[arena_idx as usize].push(node_idx);
+        let cache_idx = self
+            .get_cache_idx(arena_idx)
+            .expect("Arena must be allocated before free_node");
+        self.node_free_lists[cache_idx].push(node_idx);
     }
 
     /// Allocate a leaf, reusing from free list if available.
@@ -380,7 +523,7 @@ impl ArenaAllocator {
     /// If no freed leaves are available, allocates a new leaf from the arena.
     ///
     /// # Arguments
-    /// * `arena_idx` - Arena index (cache_key from SegmentMeta)
+    /// * `arena_idx` - Arena index from key (via TrieKey::arena_idx())
     /// * `prefix` - 56-bit prefix for the leaf (upper bits of keys)
     ///
     /// # Returns
@@ -391,27 +534,23 @@ impl ArenaAllocator {
     /// - Free list miss: O(1) - arena allocation (~5-10 cycles)
     ///
     /// # Panics
-    /// Panics if arena_idx is out of bounds or arena is not allocated
+    /// Panics if arena_idx is not allocated
     #[inline]
     pub fn alloc_leaf(&mut self, arena_idx: u64, prefix: u64) -> u32 {
-        let arena_idx_usize = arena_idx as usize;
+        let cache_idx = self
+            .get_cache_idx(arena_idx)
+            .expect("Arena must be allocated before alloc_leaf");
 
         // Try to reuse from free list first
-        if let Some(idx) = self.leaf_free_lists[arena_idx_usize].pop() {
+        if let Some(idx) = self.leaf_free_lists[cache_idx].pop() {
             // Reinitialize the leaf with new prefix
-            let leaf_arena = self.leaf_arenas[arena_idx_usize]
-                .as_mut()
-                .expect("Leaf arena should be allocated");
-            let leaf = leaf_arena.get_mut(idx);
+            let leaf = self.leaf_arenas[cache_idx].get_mut(idx);
             *leaf = crate::trie::Leaf::new(prefix);
             return idx;
         }
 
         // No free leaves - allocate new one
-        self.leaf_arenas[arena_idx_usize]
-            .as_mut()
-            .expect("Leaf arena should be allocated")
-            .alloc(prefix)
+        self.leaf_arenas[cache_idx].alloc(prefix)
     }
 
     /// Free a leaf, adding it to the free list for reuse.
@@ -420,7 +559,7 @@ impl ArenaAllocator {
     /// The leaf memory is not cleared - it will be reinitialized on reuse.
     ///
     /// # Arguments
-    /// * `arena_idx` - Arena index (cache_key from SegmentMeta)
+    /// * `arena_idx` - Arena index from key (via TrieKey::arena_idx())
     /// * `leaf_idx` - Index of leaf to free
     ///
     /// # Performance
@@ -431,7 +570,10 @@ impl ArenaAllocator {
     /// and no longer referenced before freeing it.
     #[inline]
     pub fn free_leaf(&mut self, arena_idx: u64, leaf_idx: u32) {
-        self.leaf_free_lists[arena_idx as usize].push(leaf_idx);
+        let cache_idx = self
+            .get_cache_idx(arena_idx)
+            .expect("Arena must be allocated before free_leaf");
+        self.leaf_free_lists[cache_idx].push(leaf_idx);
     }
 }
 
