@@ -681,15 +681,18 @@ impl<K: TrieKey> Trie<K> {
         path_len: usize,
         arena_idx: u64,
     ) -> Option<K> {
-        // Find next leaf using backtracking
-        let next_leaf_idx = self.find_next_leaf(path, path_len, arena_idx);
+        use crate::trie::{unpack_link, EMPTY_LINK};
 
-        if next_leaf_idx == crate::constants::EMPTY {
+        // Find next leaf using backtracking
+        let next_link = self.find_next_leaf(path, path_len, arena_idx);
+
+        if next_link == EMPTY_LINK {
             return None;
         }
 
         // Get minimum key from next leaf
-        let leaf_arena = self.allocator.get_leaf_arena(arena_idx)?;
+        let (next_arena_idx, next_leaf_idx) = unpack_link(next_link);
+        let leaf_arena = self.allocator.get_leaf_arena(next_arena_idx)?;
         let next_leaf = leaf_arena.get(next_leaf_idx);
 
         if let Some(min_bit) = crate::bitmap::min_bit(&next_leaf.bitmap) {
@@ -888,15 +891,18 @@ impl<K: TrieKey> Trie<K> {
         path_len: usize,
         arena_idx: u64,
     ) -> Option<K> {
-        // Find prev leaf using backtracking
-        let prev_leaf_idx = self.find_prev_leaf(path, path_len, arena_idx);
+        use crate::trie::{unpack_link, EMPTY_LINK};
 
-        if prev_leaf_idx == crate::constants::EMPTY {
+        // Find prev leaf using backtracking
+        let prev_link = self.find_prev_leaf(path, path_len, arena_idx);
+
+        if prev_link == EMPTY_LINK {
             return None;
         }
 
         // Get maximum key from prev leaf
-        let leaf_arena = self.allocator.get_leaf_arena(arena_idx)?;
+        let (prev_arena_idx, prev_leaf_idx) = unpack_link(prev_link);
+        let leaf_arena = self.allocator.get_leaf_arena(prev_arena_idx)?;
         let prev_leaf = leaf_arena.get(prev_leaf_idx);
 
         if let Some(max_bit) = crate::bitmap::max_bit(&prev_leaf.bitmap) {
@@ -1452,20 +1458,8 @@ impl<K: TrieKey> Trie<K> {
         }
 
         // Find prev/next leaves using trie backtracking
-        let prev_leaf_idx = self.find_prev_leaf(path, path_len, arena_idx);
-        let next_leaf_idx = self.find_next_leaf(path, path_len, arena_idx);
-
-        // Pack prev/next links (they are in same arena as current leaf for now)
-        let prev_link = if prev_leaf_idx == crate::constants::EMPTY {
-            EMPTY_LINK
-        } else {
-            pack_link(arena_idx, prev_leaf_idx)
-        };
-        let next_link = if next_leaf_idx == crate::constants::EMPTY {
-            EMPTY_LINK
-        } else {
-            pack_link(arena_idx, next_leaf_idx)
-        };
+        let prev_link = self.find_prev_leaf(path, path_len, arena_idx);
+        let next_link = self.find_next_leaf(path, path_len, arena_idx);
 
         // Get leaf arena for updates
         let leaf_arena = self
@@ -1521,14 +1515,16 @@ impl<K: TrieKey> Trie<K> {
     /// * `arena_idx` - Arena index for storage
     ///
     /// # Returns
-    /// Index of the previous leaf in sorted order, or EMPTY if none exists
+    /// Packed link (arena_idx << 32 | leaf_idx) of the previous leaf, or EMPTY_LINK if none exists
     ///
     /// # Performance
-    /// O(log log U) - backtracks at most K::LEVELS levels
-    fn find_prev_leaf(&self, path: &[(u32, u8)], path_len: usize, arena_idx: u64) -> u32 {
+    /// O(log log U) - backtracks at most K::LEVELS levels, supports cross-arena navigation
+    fn find_prev_leaf(&self, path: &[(u32, u8)], path_len: usize, arena_idx: u64) -> u64 {
+        use crate::trie::EMPTY_LINK;
+
         let node_arena = match self.allocator.get_node_arena(arena_idx) {
             Some(arena) => arena,
-            None => return crate::constants::EMPTY,
+            None => return EMPTY_LINK,
         };
 
         // Backtrack through path to find predecessor branch
@@ -1545,7 +1541,7 @@ impl<K: TrieKey> Trie<K> {
         }
 
         // No predecessor found
-        crate::constants::EMPTY
+        EMPTY_LINK
     }
 
     /// Find next leaf using trie backtracking.
@@ -1560,14 +1556,16 @@ impl<K: TrieKey> Trie<K> {
     /// * `arena_idx` - Arena index for storage
     ///
     /// # Returns
-    /// Index of the next leaf in sorted order, or EMPTY if none exists
+    /// Packed link (arena_idx << 32 | leaf_idx) of the next leaf, or EMPTY_LINK if none exists
     ///
     /// # Performance
-    /// O(log log U) - backtracks at most K::LEVELS levels
-    fn find_next_leaf(&self, path: &[(u32, u8)], path_len: usize, arena_idx: u64) -> u32 {
+    /// O(log log U) - backtracks at most K::LEVELS levels, supports cross-arena navigation
+    fn find_next_leaf(&self, path: &[(u32, u8)], path_len: usize, arena_idx: u64) -> u64 {
+        use crate::trie::EMPTY_LINK;
+
         let node_arena = match self.allocator.get_node_arena(arena_idx) {
             Some(arena) => arena,
-            None => return crate::constants::EMPTY,
+            None => return EMPTY_LINK,
         };
 
         // Backtrack through path to find successor branch
@@ -1584,7 +1582,7 @@ impl<K: TrieKey> Trie<K> {
         }
 
         // No successor found
-        crate::constants::EMPTY
+        EMPTY_LINK
     }
 
     /// Find minimum leaf starting from a node at given level.
@@ -1599,31 +1597,49 @@ impl<K: TrieKey> Trie<K> {
     /// * `arena_idx` - Arena index for storage
     ///
     /// # Returns
-    /// Index of the minimum leaf reachable from this node, or EMPTY if none exists
+    /// Packed link (arena_idx << 32 | leaf_idx) of the minimum leaf, or EMPTY_LINK if none exists
     ///
     /// # Performance
-    /// O(K::LEVELS - start_level) = O(log log U)
-    fn find_min_leaf_from(&self, mut node_idx: u32, start_level: usize, arena_idx: u64) -> u32 {
-        let node_arena = match self.allocator.get_node_arena(arena_idx) {
-            Some(arena) => arena,
-            None => return crate::constants::EMPTY,
-        };
+    /// O(K::LEVELS - start_level) = O(log log U), supports cross-arena navigation
+    fn find_min_leaf_from(&self, mut node_idx: u32, start_level: usize, mut arena_idx: u64) -> u64 {
+        use crate::trie::{pack_link, EMPTY_LINK};
 
         // Traverse internal levels from start_level to K::LEVELS-1
-        for _level in start_level..(K::LEVELS - 1) {
+        for level in start_level..(K::LEVELS - 1) {
+            let node_arena = match self.allocator.get_node_arena(arena_idx) {
+                Some(arena) => arena,
+                None => return EMPTY_LINK,
+            };
+            
             let node = node_arena.get(node_idx);
             let min_byte = match node.min_child() {
                 Some(b) => b,
-                None => return crate::constants::EMPTY,
+                None => return EMPTY_LINK,
             };
             node_idx = node.get_child(min_byte);
+
+            // Check if we need to switch arenas at split level
+            if K::SPLIT_LEVELS.contains(&level) {
+                let child_arena_idx = node.child_arena_idx as u64;
+                if !self.allocator.has_arena(child_arena_idx) {
+                    return EMPTY_LINK;
+                }
+                arena_idx = child_arena_idx;
+            }
         }
 
         // Final level: get minimum leaf
+        let node_arena = match self.allocator.get_node_arena(arena_idx) {
+            Some(arena) => arena,
+            None => return EMPTY_LINK,
+        };
         let final_node = node_arena.get(node_idx);
         match final_node.min_child() {
-            Some(min_byte) => final_node.get_child(min_byte),
-            None => crate::constants::EMPTY,
+            Some(min_byte) => {
+                let leaf_idx = final_node.get_child(min_byte);
+                pack_link(arena_idx, leaf_idx)
+            }
+            None => EMPTY_LINK,
         }
     }
 
@@ -1639,31 +1655,49 @@ impl<K: TrieKey> Trie<K> {
     /// * `arena_idx` - Arena index for storage
     ///
     /// # Returns
-    /// Index of the maximum leaf reachable from this node, or EMPTY if none exists
+    /// Packed link (arena_idx << 32 | leaf_idx) of the maximum leaf, or EMPTY_LINK if none exists
     ///
     /// # Performance
-    /// O(K::LEVELS - start_level) = O(log log U)
-    fn find_max_leaf_from(&self, mut node_idx: u32, start_level: usize, arena_idx: u64) -> u32 {
-        let node_arena = match self.allocator.get_node_arena(arena_idx) {
-            Some(arena) => arena,
-            None => return crate::constants::EMPTY,
-        };
+    /// O(K::LEVELS - start_level) = O(log log U), supports cross-arena navigation
+    fn find_max_leaf_from(&self, mut node_idx: u32, start_level: usize, mut arena_idx: u64) -> u64 {
+        use crate::trie::{pack_link, EMPTY_LINK};
 
         // Traverse internal levels from start_level to K::LEVELS-1
-        for _level in start_level..(K::LEVELS - 1) {
+        for level in start_level..(K::LEVELS - 1) {
+            let node_arena = match self.allocator.get_node_arena(arena_idx) {
+                Some(arena) => arena,
+                None => return EMPTY_LINK,
+            };
+            
             let node = node_arena.get(node_idx);
             let max_byte = match node.max_child() {
                 Some(b) => b,
-                None => return crate::constants::EMPTY,
+                None => return EMPTY_LINK,
             };
             node_idx = node.get_child(max_byte);
+
+            // Check if we need to switch arenas at split level
+            if K::SPLIT_LEVELS.contains(&level) {
+                let child_arena_idx = node.child_arena_idx as u64;
+                if !self.allocator.has_arena(child_arena_idx) {
+                    return EMPTY_LINK;
+                }
+                arena_idx = child_arena_idx;
+            }
         }
 
         // Final level: get maximum leaf
+        let node_arena = match self.allocator.get_node_arena(arena_idx) {
+            Some(arena) => arena,
+            None => return EMPTY_LINK,
+        };
         let final_node = node_arena.get(node_idx);
         match final_node.max_child() {
-            Some(max_byte) => final_node.get_child(max_byte),
-            None => crate::constants::EMPTY,
+            Some(max_byte) => {
+                let leaf_idx = final_node.get_child(max_byte);
+                pack_link(arena_idx, leaf_idx)
+            }
+            None => EMPTY_LINK,
         }
     }
 
