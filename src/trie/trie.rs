@@ -1561,7 +1561,20 @@ impl<K: TrieKey> Trie<K> {
             if let Some(pred_byte) = node.predecessor_child(byte) {
                 // Found predecessor branch - descend to maximum leaf
                 let pred_child_idx = node.get_child(pred_byte);
-                return self.find_max_leaf_from(pred_child_idx, i + 1, arena_idx);
+                
+                // Check if next level is a split level - need to switch arena
+                let next_arena_idx = if K::SPLIT_LEVELS.contains(&(i + 1)) {
+                    // Get child_arena_idx from the node we're descending into
+                    let child_arena_idx = node.child_arena_idx as u64;
+                    if !self.allocator.has_arena(child_arena_idx) {
+                        return EMPTY_LINK;
+                    }
+                    child_arena_idx
+                } else {
+                    arena_idx
+                };
+                
+                return self.find_max_leaf_from(pred_child_idx, i + 1, next_arena_idx);
             }
         }
 
@@ -1601,7 +1614,20 @@ impl<K: TrieKey> Trie<K> {
             if let Some(succ_byte) = node.successor_child(byte) {
                 // Found successor branch - descend to minimum leaf
                 let succ_child_idx = node.get_child(succ_byte);
-                return self.find_min_leaf_from(succ_child_idx, i + 1, arena_idx);
+                
+                // Check if next level is a split level - need to switch arena
+                let next_arena_idx = if K::SPLIT_LEVELS.contains(&(i + 1)) {
+                    // Get child_arena_idx from the node we're descending into
+                    let child_arena_idx = node.child_arena_idx as u64;
+                    if !self.allocator.has_arena(child_arena_idx) {
+                        return EMPTY_LINK;
+                    }
+                    child_arena_idx
+                } else {
+                    arena_idx
+                };
+                
+                return self.find_min_leaf_from(succ_child_idx, i + 1, next_arena_idx);
             }
         }
 
