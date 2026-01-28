@@ -11,9 +11,12 @@ pub mod free_list;
 pub mod handle;
 pub mod numa;
 pub mod segment;
+pub mod segment_manager;
 
 // Re-exports
+#[deprecated(note = "Use SegmentManager instead - arenas are now stored in nodes")]
 pub use allocator::ArenaAllocator;
 pub use arena::Arena;
 pub use cache::SegmentCache;
 pub use segment::{KeyRange, SegmentId, SegmentMeta};
+pub use segment_manager::SegmentManager;
