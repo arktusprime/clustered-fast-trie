@@ -115,14 +115,9 @@ impl ArenaAllocator {
         // For now, use segment count as base arena index
         let cache_key = self.segments.len() as u64;
 
-        // Calculate run_length (number of arenas needed for this key range)
-        // For now, allocate 1 arena - will expand as needed
-        let run_length = 1;
-
         // Create segment metadata
         let segment_meta = SegmentMeta::new(
             cache_key,
-            run_length,
             key_range.start, // key_offset = start of range
             numa_node,
         );

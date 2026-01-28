@@ -10,62 +10,58 @@ pub type SegmentId = u32;
 
 /// Segment metadata structure.
 ///
-/// Maps permanent segment ID to physical arena location with key transposition.
+/// Maps segment ID to key range with prefix-based partitioning.
+/// All segments share the same hierarchical arena structure.
+///
+/// # Architecture
+/// - Single-tenant: 1 segment covering entire key space
+/// - Multi-tenant: N segments with prefix-based partitioning (segment_id = key >> segment_shift)
 ///
 /// # Memory Layout
-/// - `cache_key`: 8 bytes - physical position in arena Vec (u64 for u128 support)
-/// - `run_length`: 8 bytes - number of consecutive arenas (u64 for u128 support)
-/// - `key_offset`: 16 bytes - transposition offset for key range (u128 for all key types)
+/// - `cache_key`: 8 bytes - root arena index in sparse/dense mapping
+/// - `key_offset`: 16 bytes - transposition offset for normalized keys
 /// - `numa_node`: 1 byte - NUMA node for locality
-/// - Total: 33 bytes (padded to 40 bytes by compiler)
-///
-/// # Two-Level Addressing
-/// - Client uses `SegmentId` (perm_key)
-/// - System maps to `cache_key` for O(1) arena access
-/// - Enables transparent defragmentation
+/// - Total: 25 bytes (padded to 32 bytes by compiler)
 ///
 /// # Key Transposition
 /// - Client keys: arbitrary range [start, start + size)
-/// - Internal keys: relative_key = client_key - key_offset
-/// - Arena selection: arena_idx = cache_key + (relative_key >> arena_shift)
+/// - Normalized keys: normalized_key = client_key - key_offset
+/// - Shared hierarchy: all segments use same arena structure
 ///
-/// # Arena Sizing
-/// - u32/u64: arena covers 2^32 keys (arena_shift = 32)
-/// - u128: arena covers 2^64 keys (arena_shift = 64)
+/// # Prefix-based Partitioning (Multi-tenant)
+/// - segment_id = key >> segment_shift (O(1) lookup)
+/// - Fixed segment sizes = guaranteed performance per tenant
+/// - Clustered keys stay in same segment (locality preserved)
 ///
-/// # Key Type Support
-/// - Works with u32, u64, u128 keys via TrieKey trait
-/// - key_offset is always u128 (sufficient for all key types)
-/// - cache_key and run_length are u64 (sufficient for u128 with 2^64 arenas)
+/// # Hierarchical Arenas
+/// - Root arena: cache_key (unique per segment in multi-tenant)
+/// - Child arenas: calculated via TrieKey::arena_idx_at_level() from normalized key
+/// - Shared structure: no duplication, efficient memory usage
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SegmentMeta {
-    /// Physical position in arena Vec.
+    /// Root arena index in sparse/dense mapping.
     ///
-    /// Points to first arena of this segment.
-    /// Updated during defragmentation.
-    /// u64 to support u128 keys (up to 2^64 arenas).
+    /// - Single-tenant: always 0 (one root arena)
+    /// - Multi-tenant: unique per segment for isolation
+    ///
+    /// Child arenas are calculated from normalized keys,
+    /// not stored in SegmentMeta (shared hierarchy).
     pub cache_key: u64,
 
-    /// Number of consecutive arenas allocated for this segment.
+    /// Transposition offset for key normalization.
     ///
-    /// Segment capacity depends on key type:
-    /// - u32: run_length × 2^32 keys
-    /// - u64: run_length × 2^32 keys
-    /// - u128: run_length × 2^64 keys
-    pub run_length: u64,
-
-    /// Transposition offset for key range mapping.
+    /// Converts client keys to normalized keys:
+    /// `normalized_key = client_key - key_offset`
     ///
-    /// Converts client keys to internal relative keys:
-    /// `relative_key = client_key - key_offset`
+    /// - Single-tenant: 0 (no transposition)
+    /// - Multi-tenant: start of segment's key range
     ///
     /// Uses u128 to support all key types (u32, u64, u128).
-    /// Allows segments to use arbitrary key ranges.
     pub key_offset: u128,
 
     /// NUMA node for memory allocation.
     ///
-    /// All arenas of this segment allocated on same NUMA node
+    /// All arenas accessed by this segment allocated on same NUMA node
     /// for optimal memory locality and performance.
     pub numa_node: u8,
 }
@@ -85,9 +81,8 @@ impl SegmentMeta {
     /// Create new segment metadata.
     ///
     /// # Arguments
-    /// * `cache_key` - Physical position in arena Vec
-    /// * `run_length` - Number of consecutive arenas
-    /// * `key_offset` - Transposition offset for key mapping
+    /// * `cache_key` - Root arena index in sparse/dense mapping
+    /// * `key_offset` - Transposition offset for key normalization
     /// * `numa_node` - NUMA node for allocation
     ///
     /// # Returns
@@ -96,78 +91,99 @@ impl SegmentMeta {
     /// # Performance
     /// O(1) - simple struct initialization
     #[inline(always)]
-    pub fn new(cache_key: u64, run_length: u64, key_offset: u128, numa_node: u8) -> Self {
+    pub fn new(cache_key: u64, key_offset: u128, numa_node: u8) -> Self {
         SegmentMeta {
             cache_key,
-            run_length,
             key_offset,
             numa_node,
         }
     }
 
-    /// Get physical arena index for a given key.
+    /// Get root arena index for this segment.
     ///
-    /// # Arguments
-    /// * `key` - Client key to map (u32, u64, or u128)
+    /// Root arena is used for trie levels 0 to first split level.
     ///
     /// # Returns
-    /// Physical arena index in the arena Vec
+    /// Root arena index (cache_key)
     ///
     /// # Performance
-    /// O(1) - arithmetic operations only
-    ///
-    /// # Formula
-    /// ```text
-    /// relative_key = key - key_offset
-    /// arena_offset = relative_key >> arena_shift
-    /// arena_idx = cache_key + arena_offset
-    ///
-    /// Where arena_shift:
-    /// - u32/u64: 32 bits (arena covers 2^32 keys)
-    /// - u128: 64 bits (arena covers 2^64 keys)
-    /// ```
+    /// O(1) - direct field access
     #[inline(always)]
-    pub fn arena_index<K: TrieKey>(&self, key: K) -> u64 {
-        let key_u128 = key.to_u128();
-        let relative_key = key_u128.wrapping_sub(self.key_offset);
-        let arena_offset = (relative_key >> K::arena_shift()) as u64;
-        self.cache_key.wrapping_add(arena_offset)
+    pub fn root_arena(&self) -> u64 {
+        self.cache_key
     }
 
-    /// Get local key within an arena.
+    /// Normalize client key to internal key.
+    ///
+    /// Applies key transposition to convert arbitrary client key ranges
+    /// to normalized keys starting from 0.
     ///
     /// # Arguments
-    /// * `key` - Client key to map (u32, u64, or u128)
+    /// * `key` - Client key (u32, u64, or u128)
     ///
     /// # Returns
-    /// Local key within the arena
-    /// - u32/u64: 0 to 2^32-1
-    /// - u128: 0 to 2^64-1
+    /// Normalized key for internal trie operations
+    ///
+    /// # Performance
+    /// O(1) - single subtraction
+    ///
+    /// # Examples
+    /// ```text
+    /// Single-tenant: key_offset = 0
+    ///   client_key = 12345 → normalized_key = 12345
+    ///
+    /// Multi-tenant: key_offset = 1000000
+    ///   client_key = 1012345 → normalized_key = 12345
+    /// ```
+    #[inline(always)]
+    pub fn normalize_key<K: TrieKey>(&self, key: K) -> K {
+        let normalized = key.to_u128().wrapping_sub(self.key_offset);
+        K::from_u128(normalized)
+    }
+
+    /// Get arena index for a key at specific trie level.
+    ///
+    /// Uses hierarchical arena calculation with key normalization.
+    /// Root levels use cache_key, child levels use key-based calculation.
+    ///
+    /// # Arguments
+    /// * `key` - Client key (u32, u64, or u128)
+    /// * `level` - Trie level (0 to K::LEVELS-1)
+    ///
+    /// # Returns
+    /// Arena index for the specified level
     ///
     /// # Performance
     /// O(1) - arithmetic operations only
     ///
-    /// # Formula
-    /// ```text
-    /// relative_key = key - key_offset
-    /// local_key = relative_key & mask
+    /// # Behavior
+    /// - Root levels (0 to first split): returns cache_key
+    /// - Child levels (after split): calculates from normalized key prefix
     ///
-    /// Where mask:
-    /// - u32/u64: 0xFFFFFFFF (2^32-1)
-    /// - u128: 0xFFFFFFFFFFFFFFFF (2^64-1)
+    /// # Examples
+    /// ```text
+    /// u64 with SPLIT_LEVELS = [4]:
+    ///   level 0-3: cache_key (root arena)
+    ///   level 4-7: arena_idx_at_level(normalized_key, level)
     /// ```
     #[inline(always)]
-    pub fn local_key<K: TrieKey>(&self, key: K) -> u64 {
-        let key_u128 = key.to_u128();
-        let relative_key = key_u128.wrapping_sub(self.key_offset);
-        let mask = (1u128 << K::arena_shift()) - 1;
-        (relative_key & mask) as u64
+    pub fn arena_at_level<K: TrieKey>(&self, key: K, level: usize) -> u64 {
+        // Normalize key first
+        let normalized_key = self.normalize_key(key);
+        
+        // Root levels: use cache_key
+        if K::SPLIT_LEVELS.is_empty() || level < K::SPLIT_LEVELS[0] {
+            return self.cache_key;
+        }
+        
+        // Child levels: calculate from normalized key
+        normalized_key.arena_idx_at_level(level)
     }
 }
 
 impl Default for SegmentMeta {
     fn default() -> Self {
-        Self::new(0, 1, 0, 0)
+        Self::new(0, 0, 0)
     }
 }
 
@@ -177,116 +193,101 @@ mod tests {
 
     #[test]
     fn test_new_segment_meta() {
-        let meta = SegmentMeta::new(100, 5, 1000, 0);
+        let meta = SegmentMeta::new(100, 1000, 0);
 
         assert_eq!(meta.cache_key, 100);
-        assert_eq!(meta.run_length, 5);
         assert_eq!(meta.key_offset, 1000);
         assert_eq!(meta.numa_node, 0);
     }
 
     #[test]
-    fn test_arena_index_u32_no_offset() {
-        let meta = SegmentMeta::new(0, 1, 0, 0);
-
-        // u32 keys always in first arena
-        assert_eq!(meta.arena_index(0u32), 0);
-        assert_eq!(meta.arena_index(100u32), 0);
-        assert_eq!(meta.arena_index(u32::MAX), 0);
+    fn test_root_arena() {
+        let meta = SegmentMeta::new(42, 0, 0);
+        assert_eq!(meta.root_arena(), 42);
     }
 
     #[test]
-    fn test_arena_index_u64_no_offset() {
-        let meta = SegmentMeta::new(0, 1, 0, 0);
+    fn test_normalize_key_no_offset() {
+        let meta = SegmentMeta::new(0, 0, 0);
 
-        // Keys in first arena (0 to 2^32-1)
-        assert_eq!(meta.arena_index(0u64), 0);
-        assert_eq!(meta.arena_index(100u64), 0);
-        assert_eq!(meta.arena_index(u32::MAX as u64), 0);
-
-        // Keys in second arena (2^32 to 2×2^32-1)
-        assert_eq!(meta.arena_index(1u64 << 32), 1);
-        assert_eq!(meta.arena_index((1u64 << 32) + 100), 1);
+        // No transposition
+        assert_eq!(meta.normalize_key(0u32), 0u32);
+        assert_eq!(meta.normalize_key(12345u32), 12345u32);
+        assert_eq!(meta.normalize_key(12345u64), 12345u64);
+        assert_eq!(meta.normalize_key(12345u128), 12345u128);
     }
 
     #[test]
-    fn test_arena_index_u128_no_offset() {
-        let meta = SegmentMeta::new(0, 1, 0, 0);
+    fn test_normalize_key_with_offset() {
+        let meta = SegmentMeta::new(0, 1000, 0);
 
-        // Keys in first arena (0 to 2^64-1) - u128 uses 64-bit shift
-        assert_eq!(meta.arena_index(0u128), 0);
-        assert_eq!(meta.arena_index(100u128), 0);
-
-        // Keys in second arena (2^64 to 2×2^64-1)
-        assert_eq!(meta.arena_index(1u128 << 64), 1);
-
-        // Keys in higher arenas
-        assert_eq!(meta.arena_index((1u128 << 64) - 1), 0); // Still in first arena
+        // With transposition
+        assert_eq!(meta.normalize_key(1000u64), 0u64);
+        assert_eq!(meta.normalize_key(1100u64), 100u64);
+        assert_eq!(meta.normalize_key(1000u128), 0u128);
+        assert_eq!(meta.normalize_key(1100u128), 100u128);
     }
 
     #[test]
-    fn test_arena_index_with_offset() {
-        let meta = SegmentMeta::new(10, 5, 1000, 0);
+    fn test_arena_at_level_u32() {
+        let meta = SegmentMeta::new(42, 0, 0);
 
-        // u64: Key 1000 maps to relative_key 0 → arena 10
-        assert_eq!(meta.arena_index(1000u64), 10);
-
-        // u64: Key 1000 + 2^32 maps to relative_key 2^32 → arena 11
-        assert_eq!(meta.arena_index(1000u64 + (1u64 << 32)), 11);
-
-        // u128: Key 1000 maps to relative_key 0 → arena 10
-        assert_eq!(meta.arena_index(1000u128), 10);
+        // u32: no split levels, always root arena
+        assert_eq!(meta.arena_at_level(0u32, 0), 42);
+        assert_eq!(meta.arena_at_level(12345u32, 0), 42);
+        assert_eq!(meta.arena_at_level(12345u32, 1), 42);
+        assert_eq!(meta.arena_at_level(12345u32, 2), 42);
     }
 
     #[test]
-    fn test_local_key_u32() {
-        let meta = SegmentMeta::new(0, 1, 0, 0);
+    fn test_arena_at_level_u64_no_offset() {
+        let meta = SegmentMeta::new(0, 0, 0);
+        let key = 0x123456789ABCDEFu64;
 
-        assert_eq!(meta.local_key(0u32), 0);
-        assert_eq!(meta.local_key(100u32), 100);
-        assert_eq!(meta.local_key(u32::MAX), u32::MAX as u64);
+        // Levels 0-3: root arena
+        assert_eq!(meta.arena_at_level(key, 0), 0);
+        assert_eq!(meta.arena_at_level(key, 1), 0);
+        assert_eq!(meta.arena_at_level(key, 2), 0);
+        assert_eq!(meta.arena_at_level(key, 3), 0);
+
+        // Levels 4-7: child arena (upper 4 bytes)
+        assert_eq!(meta.arena_at_level(key, 4), 0x01234567);
+        assert_eq!(meta.arena_at_level(key, 5), 0x01234567);
+        assert_eq!(meta.arena_at_level(key, 6), 0x01234567);
     }
 
     #[test]
-    fn test_local_key_u64_no_offset() {
-        let meta = SegmentMeta::new(0, 1, 0, 0);
+    fn test_arena_at_level_u64_with_offset() {
+        let meta = SegmentMeta::new(100, 0x1000000000000000, 0);
+        let key = 0x1000000012345678u64;
 
-        assert_eq!(meta.local_key(0u64), 0);
-        assert_eq!(meta.local_key(100u64), 100);
-        assert_eq!(meta.local_key(u32::MAX as u64), u32::MAX as u64);
+        // After normalization: 0x12345678
+        // Levels 0-3: root arena
+        assert_eq!(meta.arena_at_level(key, 0), 100);
+        assert_eq!(meta.arena_at_level(key, 3), 100);
 
-        // Keys in second arena
-        assert_eq!(meta.local_key(1u64 << 32), 0);
-        assert_eq!(meta.local_key((1u64 << 32) + 100), 100);
+        // Levels 4-7: child arena from normalized key (0x00000000)
+        assert_eq!(meta.arena_at_level(key, 4), 0);
     }
 
     #[test]
-    fn test_local_key_u128_no_offset() {
-        let meta = SegmentMeta::new(0, 1, 0, 0);
+    fn test_arena_at_level_u128_no_offset() {
+        let meta = SegmentMeta::new(0, 0, 0);
+        let key = 0x0102030405060708090A0B0C0D0E0F10u128;
 
-        assert_eq!(meta.local_key(0u128), 0);
-        assert_eq!(meta.local_key(100u128), 100);
+        // Levels 0-3: root arena
+        assert_eq!(meta.arena_at_level(key, 0), 0);
+        assert_eq!(meta.arena_at_level(key, 3), 0);
 
-        // Keys in second arena - u128 uses 64-bit mask
-        assert_eq!(meta.local_key(1u128 << 64), 0); // Start of second arena
-        assert_eq!(meta.local_key((1u128 << 64) + 100), 100);
-    }
+        // Levels 4-11: L1 child arena (bytes 4-7)
+        let expected_l1 = 0x05060708u64;
+        assert_eq!(meta.arena_at_level(key, 4), expected_l1);
+        assert_eq!(meta.arena_at_level(key, 11), expected_l1);
 
-    #[test]
-    fn test_local_key_with_offset() {
-        let meta = SegmentMeta::new(10, 5, 1000, 0);
-
-        // u64: Key 1000 → relative_key 0 → local_key 0
-        assert_eq!(meta.local_key(1000u64), 0);
-
-        // u64: Key 1100 → relative_key 100 → local_key 100
-        assert_eq!(meta.local_key(1100u64), 100);
-
-        // u64: Key 1000 + 2^32 → relative_key 2^32 → local_key 0
-        assert_eq!(meta.local_key(1000u64 + (1u64 << 32)), 0);
-
-        // u128: Key 1000 → relative_key 0 → local_key 0
-        assert_eq!(meta.local_key(1000u128), 0);
+        // Levels 12-15: L2 child arena (bytes 0-11)
+        let expected_l2 = (0x0102030405060708u64 << 32) | 0x090A0B0Cu64;
+        assert_eq!(meta.arena_at_level(key, 12), expected_l2);
+        assert_eq!(meta.arena_at_level(key, 14), expected_l2);
     }
 
     #[test]
@@ -294,7 +295,6 @@ mod tests {
         let meta = SegmentMeta::default();
 
         assert_eq!(meta.cache_key, 0);
-        assert_eq!(meta.run_length, 1);
         assert_eq!(meta.key_offset, 0);
         assert_eq!(meta.numa_node, 0);
     }
@@ -303,7 +303,7 @@ mod tests {
     fn test_segment_meta_size() {
         use core::mem::size_of;
 
-        // Should be reasonable (33 bytes + padding to 40 bytes with u64 fields)
-        assert!(size_of::<SegmentMeta>() <= 48);
+        // Should be compact: 8 + 16 + 1 = 25 bytes (padded to 32)
+        assert!(size_of::<SegmentMeta>() <= 32);
     }
 }
