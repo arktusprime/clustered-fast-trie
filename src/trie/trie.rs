@@ -303,14 +303,14 @@ impl<K: TrieKey> Trie<K> {
         }
 
         // Step 3: Traverse trie levels to find leaf, tracking path and arena switches
-        let mut path: [(u32, u8); 16] = [(0, 0); 16]; // Max 16 levels for u128
+        let mut path: [(u32, u8, u64); 16] = [(0, 0, 0); 16]; // Max 16 levels for u128: (node_idx, byte, arena_idx)
         let mut path_len = 0;
         let mut current_node_idx = 0; // Start at root
 
         // Traverse internal levels (0..K::LEVELS-1)
         for level in 0..(K::LEVELS - 1) {
             let byte = key.byte_at(level);
-            path[path_len] = (current_node_idx, byte);
+            path[path_len] = (current_node_idx, byte, current_arena_idx);
             path_len += 1;
 
             // Get current node arena (may have changed at split level)
@@ -342,7 +342,7 @@ impl<K: TrieKey> Trie<K> {
 
         // Final level: check if leaf exists
         let last_node_byte = key.byte_at(K::LEVELS - 1);
-        path[path_len] = (current_node_idx, last_node_byte);
+        path[path_len] = (current_node_idx, last_node_byte, current_arena_idx);
         path_len += 1;
 
         let node_arena = match self.allocator.get_node_arena(current_arena_idx) {
@@ -398,7 +398,7 @@ impl<K: TrieKey> Trie<K> {
             self.allocator.free_leaf(current_arena_idx, leaf_idx);
 
             // Cleanup empty nodes up the path
-            self.cleanup_empty_nodes(&path, path_len - 1, current_arena_idx);
+            self.cleanup_empty_nodes(&path, path_len - 1);
         }
 
         // Step 7: Update cache
@@ -1719,13 +1719,12 @@ impl<K: TrieKey> Trie<K> {
     /// 3. Never delete root node (index 0)
     ///
     /// # Arguments
-    /// * `path` - Array of (node_idx, byte) pairs from root to leaf
+    /// * `path` - Array of (node_idx, byte, arena_idx) tuples from root to leaf
     /// * `path_len` - Number of valid entries in path
-    /// * `arena_idx` - Arena index for node storage
     ///
     /// # Performance
     /// O(K::LEVELS) worst case, but typically stops early at first non-empty node
-    fn cleanup_empty_nodes(&mut self, path: &[(u32, u8)], path_len: usize, arena_idx: u64) {
+    fn cleanup_empty_nodes(&mut self, path: &[(u32, u8, u64)], path_len: usize) {
         // Nothing to clean if path is empty
         if path_len == 0 {
             return;
@@ -1734,7 +1733,7 @@ impl<K: TrieKey> Trie<K> {
         // Traverse path bottom-up (from leaf towards root)
         // Start at path_len-1 (last node before leaf)
         for i in (0..path_len).rev() {
-            let (node_idx, byte) = path[i];
+            let (node_idx, byte, arena_idx) = path[i];
 
             // Never delete root node (index 0)
             if node_idx == 0 {
@@ -1760,12 +1759,12 @@ impl<K: TrieKey> Trie<K> {
             // Node is empty - remove link from parent and free it
             if i > 0 {
                 // Get parent from previous level in path
-                let (parent_idx, _) = path[i - 1];
+                let (parent_idx, _, parent_arena_idx) = path[i - 1];
 
                 // Remove link from parent
                 let node_arena = self
                     .allocator
-                    .get_node_arena_mut(arena_idx)
+                    .get_node_arena_mut(parent_arena_idx)
                     .expect("Node arena should be allocated");
                 let parent = node_arena.get_mut(parent_idx);
                 parent.clear_child(byte);
