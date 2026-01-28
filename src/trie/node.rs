@@ -11,8 +11,8 @@ use crate::constants::EMPTY;
 /// - `seq`: 8 bytes - sequence counter for seqlock
 /// - `bitmap`: 32 bytes (256 bits = 4 × u64) - child existence bitmap
 /// - `parent_idx`: 4 bytes - index of parent node (for cleanup)
+/// - `child_arena_idx`: 4 bytes - arena index for children (hierarchical arenas)
 /// - `_pad`: 16 bytes padding - completes cache line 0
-/// - `_pad2`: 4 bytes padding - aligns to 64 bytes
 /// - `children`: 1024 bytes (256 × u32) - cache lines 1-16
 /// - Total: 1088 bytes per node (17 cache lines)
 ///
@@ -21,11 +21,17 @@ use crate::constants::EMPTY;
 /// - Seq and bitmap in dedicated cache line for fast access
 /// - Children array starts at cache line boundary
 ///
+/// # Hierarchical Arenas
+/// - Nodes at split levels store child_arena_idx for their subtrees
+/// - Enables sparse allocation and better cache locality
+/// - Split levels: u32=none, u64=[4], u128=[4,12]
+///
 /// # Performance
 /// - Child access: O(1) via direct indexing
 /// - Existence check: O(1) via bitmap
 /// - Min/max child: O(1) via bitmap intrinsics (TZCNT/LZCNT)
 /// - Parent access: O(1) via parent_idx (for cleanup)
+/// - Arena switch: O(1) via child_arena_idx at split levels
 ///
 /// # Concurrency
 /// - Seq counter for seqlock protocol (bulk operations)
@@ -53,12 +59,21 @@ pub struct Node {
     /// Root node (index 0) has parent_idx = 0 (points to itself).
     pub parent_idx: u32,
 
-    /// Additional padding to complete cache line alignment.
-    pub(crate) _pad2: u32,
+    /// Arena index for children of this node.
+    ///
+    /// Used for hierarchical arena allocation at split levels.
+    /// - Nodes at split levels: contains actual child arena index
+    /// - Other nodes: value is ignored (can be 0 or inherited)
+    ///
+    /// Split levels by key type:
+    /// - u32: no splits (always 0)
+    /// - u64: split at level 4
+    /// - u128: splits at levels 4 and 12
+    pub child_arena_idx: u32,
 
     /// Padding to align children to cache line boundary.
     ///
-    /// Ensures seq + bitmap + parent_idx occupy exactly one cache line (64 bytes).
+    /// Ensures seq + bitmap + parent_idx + child_arena_idx occupy exactly one cache line (64 bytes).
     pub(crate) _pad: [u64; 2],
 
     /// Direct-indexed children array.
@@ -73,6 +88,7 @@ impl Node {
     ///
     /// All children are initialized to `EMPTY` (u32::MAX).
     /// Parent index is initialized to 0 (will be set during insertion).
+    /// Child arena index is initialized to 0 (will be set at split levels).
     ///
     /// # Performance
     /// O(1) - uses array initialization
@@ -89,8 +105,8 @@ impl Node {
                 AtomicU64::new(0),
             ],
             parent_idx: 0,
+            child_arena_idx: 0,
             _pad: [0; 2],
-            _pad2: 0,
             children: [EMPTY; 256],
         }
     }
@@ -113,8 +129,8 @@ impl Clone for Node {
                 AtomicU64::new(self.bitmap[3].load(Ordering::Relaxed)),
             ],
             parent_idx: self.parent_idx,
+            child_arena_idx: self.child_arena_idx,
             _pad: self._pad,
-            _pad2: self._pad2,
             children: self.children,
         }
     }
@@ -148,7 +164,7 @@ mod tests {
         use core::mem::{align_of, size_of};
 
         // Verify expected memory layout with cache line alignment
-        assert_eq!(size_of::<Node>(), 1088); // 8 + 32 + 4 + 16 + 4 + 1024 = 1088 bytes
+        assert_eq!(size_of::<Node>(), 1088); // 8 + 32 + 4 + 4 + 16 + 1024 = 1088 bytes
         assert_eq!(align_of::<Node>(), 64); // Aligned to cache line
         assert_eq!(size_of::<AtomicU64>(), 8);
         assert_eq!(size_of::<[AtomicU64; 4]>(), 32);
