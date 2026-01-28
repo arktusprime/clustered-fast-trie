@@ -222,8 +222,8 @@ impl<K: TrieKey> Trie<K> {
             current_node_idx = current_node.get_child(byte);
 
             // Check if we need to switch arenas at split level
-            if K::SPLIT_LEVELS.contains(&level) {
-                // Get child arena index from current node
+            if K::SPLIT_LEVELS.contains(&(level + 1)) {
+                // Next level is a split level - get child arena index from current node
                 let child_arena_idx = current_node.child_arena_idx as u64;
                 
                 // Check if child arena exists
@@ -327,8 +327,8 @@ impl<K: TrieKey> Trie<K> {
             current_node_idx = current_node.get_child(byte);
 
             // Check if we need to switch arenas at split level
-            if K::SPLIT_LEVELS.contains(&level) {
-                // Get child arena index from current node
+            if K::SPLIT_LEVELS.contains(&(level + 1)) {
+                // Next level is a split level - get child arena index from current node
                 let child_arena_idx = current_node.child_arena_idx as u64;
                 
                 // Check if child arena exists
@@ -578,8 +578,8 @@ impl<K: TrieKey> Trie<K> {
             current_node_idx = current_node.get_child(byte);
 
             // Check if we need to switch arenas at split level
-            if K::SPLIT_LEVELS.contains(&level) {
-                // Get child arena index from current node
+            if K::SPLIT_LEVELS.contains(&(level + 1)) {
+                // Next level is a split level - get child arena index from current node
                 let child_arena_idx = current_node.child_arena_idx as u64;
                 
                 // Check if child arena exists
@@ -788,8 +788,8 @@ impl<K: TrieKey> Trie<K> {
             current_node_idx = current_node.get_child(byte);
 
             // Check if we need to switch arenas at split level
-            if K::SPLIT_LEVELS.contains(&level) {
-                // Get child arena index from current node
+            if K::SPLIT_LEVELS.contains(&(level + 1)) {
+                // Next level is a split level - get child arena index from current node
                 let child_arena_idx = current_node.child_arena_idx as u64;
                 
                 // Check if child arena exists
@@ -997,8 +997,8 @@ impl<K: TrieKey> Trie<K> {
             current_node_idx = node.get_child(min_byte);
 
             // Check if we need to switch arenas at split level
-            if K::SPLIT_LEVELS.contains(&level) {
-                // Get child arena index from current node
+            if K::SPLIT_LEVELS.contains(&(level + 1)) {
+                // Next level is a split level - get child arena index from current node
                 let child_arena_idx = node.child_arena_idx as u64;
                 
                 // Check if child arena exists
@@ -1068,8 +1068,8 @@ impl<K: TrieKey> Trie<K> {
             current_node_idx = node.get_child(max_byte);
 
             // Check if we need to switch arenas at split level
-            if K::SPLIT_LEVELS.contains(&level) {
-                // Get child arena index from current node
+            if K::SPLIT_LEVELS.contains(&(level + 1)) {
+                // Next level is a split level - get child arena index from current node
                 let child_arena_idx = node.child_arena_idx as u64;
                 
                 // Check if child arena exists
@@ -1643,7 +1643,7 @@ impl<K: TrieKey> Trie<K> {
             node_idx = node.get_child(min_byte);
 
             // Check if we need to switch arenas at split level
-            if K::SPLIT_LEVELS.contains(&level) {
+            if K::SPLIT_LEVELS.contains(&(level + 1)) {
                 let child_arena_idx = node.child_arena_idx as u64;
                 if !self.allocator.has_arena(child_arena_idx) {
                     return EMPTY_LINK;
@@ -1701,7 +1701,7 @@ impl<K: TrieKey> Trie<K> {
             node_idx = node.get_child(max_byte);
 
             // Check if we need to switch arenas at split level
-            if K::SPLIT_LEVELS.contains(&level) {
+            if K::SPLIT_LEVELS.contains(&(level + 1)) {
                 let child_arena_idx = node.child_arena_idx as u64;
                 if !self.allocator.has_arena(child_arena_idx) {
                     return EMPTY_LINK;
@@ -1808,6 +1808,9 @@ impl<K: TrieKey> Default for Trie<K> {
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
+    use std::println;
+    use std::eprintln;
     use super::*;
 
     #[test]
@@ -2036,15 +2039,31 @@ mod tests {
         let key4 = 0x0102030506060708u64; // Differs at byte 5
 
         // Insert all keys
-        assert!(trie.insert(key1));
-        assert!(trie.insert(key2));
-        assert!(trie.insert(key3));
-        assert!(trie.insert(key4));
+        let r1 = trie.insert(key1);
+        eprintln!("Insert key1: {}", r1);
+        let r2 = trie.insert(key2);
+        eprintln!("Insert key2: {}", r2);
+        let r3 = trie.insert(key3);
+        eprintln!("Insert key3: {}", r3);
+        let r4 = trie.insert(key4);
+        eprintln!("Insert key4: {}", r4);
+
+        // Debug arena state
+        eprintln!("Root arena nodes: {:?}", trie.allocator.get_node_arena(0).map(|a| a.len()));
+        eprintln!("Root arena leaves: {:?}", trie.allocator.get_leaf_arena(0).map(|a| a.len()));
+        eprintln!("Child arena 0x01020304 nodes: {:?}", trie.allocator.get_node_arena(0x01020304).map(|a| a.len()));
+        eprintln!("Child arena 0x01020304 leaves: {:?}", trie.allocator.get_leaf_arena(0x01020304).map(|a| a.len()));
 
         // Verify all keys exist
-        assert!(trie.contains(key1));
+        eprintln!("Checking key1...");
+        let c1 = trie.contains(key1);
+        eprintln!("Contains key1: {}", c1);
+        assert!(c1);
+        eprintln!("Checking key2...");
         assert!(trie.contains(key2));
+        eprintln!("Checking key3...");
         assert!(trie.contains(key3));
+        eprintln!("Checking key4...");
         assert!(trie.contains(key4));
 
         // For u64 with split at level 4, these keys create child arena
