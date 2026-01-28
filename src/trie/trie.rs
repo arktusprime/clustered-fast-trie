@@ -1026,8 +1026,8 @@ impl<K: TrieKey> Trie<K> {
         &mut self,
         key: K,
         mut current_node_idx: u32,
-        arena_idx: u64,
-    ) -> (u32, [(u32, u8); 16], usize) {
+        mut current_arena_idx: u64,
+    ) -> (u32, [(u32, u8); 16], usize, u64) {
         // Path tracking: (node_idx, byte) for each level
         // Max 16 levels for u128 (0..15)
         let mut path = [(0u32, 0u8); 16];
@@ -1046,7 +1046,7 @@ impl<K: TrieKey> Trie<K> {
             let child_idx = {
                 let node_arena = self
                     .allocator
-                    .get_node_arena(arena_idx)
+                    .get_node_arena(current_arena_idx)
                     .expect("Node arena should be allocated");
                 let current_node = node_arena.get(current_node_idx);
 
@@ -1060,11 +1060,22 @@ impl<K: TrieKey> Trie<K> {
             if let Some(idx) = child_idx {
                 // Child exists - move to it
                 current_node_idx = idx;
+                
+                // Check if we need to switch arena at split level
+                if K::SPLIT_LEVELS.contains(&(level + 1)) {
+                    // Next level is a split level - get child_arena_idx from current node
+                    let node_arena = self
+                        .allocator
+                        .get_node_arena(current_arena_idx)
+                        .expect("Node arena should be allocated");
+                    let current_node = node_arena.get(current_node_idx);
+                    current_arena_idx = current_node.child_arena_idx as u64;
+                }
             } else {
                 // Child doesn't exist - create new node and link it
                 let node_arena = self
                     .allocator
-                    .get_node_arena_mut(arena_idx)
+                    .get_node_arena_mut(current_arena_idx)
                     .expect("Node arena should be allocated");
 
                 let new_node_idx = node_arena.alloc();
@@ -1072,6 +1083,20 @@ impl<K: TrieKey> Trie<K> {
                 // Set parent_idx for the new node
                 let new_node = node_arena.get_mut(new_node_idx);
                 new_node.parent_idx = current_node_idx;
+
+                // If next level is a split level, allocate child arena
+                if K::SPLIT_LEVELS.contains(&(level + 1)) {
+                    let child_arena_idx = key.arena_idx_at_level(level + 1);
+                    
+                    // Allocate child arena if not exists
+                    if !self.allocator.has_arena(child_arena_idx) {
+                        self.allocator.allocate_arena_for_key(child_arena_idx);
+                    }
+                    
+                    // Store child_arena_idx in the new node
+                    new_node.child_arena_idx = child_arena_idx as u32;
+                    current_arena_idx = child_arena_idx;
+                }
 
                 // Link from parent to child
                 let current_node = node_arena.get_mut(current_node_idx);
@@ -1092,7 +1117,7 @@ impl<K: TrieKey> Trie<K> {
         let leaf_idx = {
             let node_arena = self
                 .allocator
-                .get_node_arena(arena_idx)
+                .get_node_arena(current_arena_idx)
                 .expect("Node arena should be allocated");
             let final_node = node_arena.get(current_node_idx);
 
@@ -1112,25 +1137,25 @@ impl<K: TrieKey> Trie<K> {
 
             let leaf_arena = self
                 .allocator
-                .get_leaf_arena_mut(arena_idx)
+                .get_leaf_arena_mut(current_arena_idx)
                 .expect("Leaf arena should be allocated");
             let new_leaf_idx = leaf_arena.alloc(prefix);
 
             let node_arena = self
                 .allocator
-                .get_node_arena_mut(arena_idx)
+                .get_node_arena_mut(current_arena_idx)
                 .expect("Node arena should be allocated");
             let final_node = node_arena.get_mut(current_node_idx);
             final_node.set_child(last_node_byte, new_leaf_idx);
 
             // Link new leaf into linked list
-            self.link_leaf(new_leaf_idx, &path, path_len, arena_idx);
+            self.link_leaf(new_leaf_idx, &path, path_len, current_arena_idx);
 
             new_leaf_idx
         };
 
-        // Return tuple: (leaf_idx, path, path_len)
-        (leaf_idx, path, path_len)
+        // Return tuple: (leaf_idx, path, path_len, arena_idx)
+        (leaf_idx, path, path_len, current_arena_idx)
     }
 
     /// Set bit in leaf bitmap for the given key.
