@@ -6,6 +6,6 @@ mod node;
 mod state;
 mod trie;
 
-pub use leaf::Leaf;
+pub use leaf::{pack_link, unpack_link, Leaf, EMPTY_LINK};
 pub use node::Node;
 pub use trie::Trie;

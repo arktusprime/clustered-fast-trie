@@ -3,6 +3,36 @@
 use crate::atomic::{AtomicU64, Ordering};
 use crate::constants::EMPTY;
 
+/// Empty link sentinel for prev/next pointers (all bits set).
+pub const EMPTY_LINK: u64 = u64::MAX;
+
+/// Pack arena_idx and leaf_idx into a single u64.
+///
+/// # Arguments
+/// * `arena_idx` - Arena index (u64, truncated to u32)
+/// * `leaf_idx` - Leaf index within arena (u32)
+///
+/// # Returns
+/// Packed u64: (arena_idx << 32) | leaf_idx
+#[inline(always)]
+pub fn pack_link(arena_idx: u64, leaf_idx: u32) -> u64 {
+    ((arena_idx as u32 as u64) << 32) | (leaf_idx as u64)
+}
+
+/// Unpack arena_idx and leaf_idx from a packed u64.
+///
+/// # Arguments
+/// * `packed` - Packed link value
+///
+/// # Returns
+/// (arena_idx, leaf_idx) tuple
+#[inline(always)]
+pub fn unpack_link(packed: u64) -> (u64, u32) {
+    let arena_idx = (packed >> 32) as u64;
+    let leaf_idx = (packed & 0xFFFFFFFF) as u32;
+    (arena_idx, leaf_idx)
+}
+
 /// Leaf node storing 256 keys via bitmap.
 ///
 /// Each leaf represents a 256-key range identified by a prefix.
@@ -11,9 +41,9 @@ use crate::constants::EMPTY;
 /// # Memory Layout
 /// - `bitmap`: 32 bytes (256 bits = 4 × u64)
 /// - `prefix`: 8 bytes (key prefix, last byte = 0)
-/// - `next`: 4 bytes (arena index of next leaf)
-/// - `prev`: 4 bytes (arena index of previous leaf)
-/// - Total: 48 bytes per leaf
+/// - `next`: 8 bytes (packed arena_idx and leaf_idx)
+/// - `prev`: 8 bytes (packed arena_idx and leaf_idx)
+/// - Total: 56 bytes per leaf
 ///
 /// # Linked List
 /// Leaves are linked in sorted order by prefix for O(1) per-element iteration.
@@ -50,15 +80,19 @@ pub struct Leaf {
     /// Immutable after leaf creation.
     pub prefix: u64,
 
-    /// Arena index of next leaf in sorted order.
+    /// Next leaf in sorted order (packed: arena_idx << 32 | leaf_idx).
     ///
-    /// Points to leaf with next higher prefix, or `EMPTY` if this is last leaf.
-    pub next: u32,
+    /// Points to leaf with next higher prefix, or `EMPTY_LINK` if this is last leaf.
+    /// Upper 32 bits: arena_idx (u64 truncated to u32 for u128 keys)
+    /// Lower 32 bits: leaf_idx within arena
+    pub next: u64,
 
-    /// Arena index of previous leaf in sorted order.
+    /// Previous leaf in sorted order (packed: arena_idx << 32 | leaf_idx).
     ///
-    /// Points to leaf with next lower prefix, or `EMPTY` if this is first leaf.
-    pub prev: u32,
+    /// Points to leaf with next lower prefix, or `EMPTY_LINK` if this is first leaf.
+    /// Upper 32 bits: arena_idx (u64 truncated to u32 for u128 keys)
+    /// Lower 32 bits: leaf_idx within arena
+    pub prev: u64,
 }
 
 impl Leaf {
@@ -68,7 +102,7 @@ impl Leaf {
     /// * `prefix` - Key prefix (last byte should be 0)
     ///
     /// # Returns
-    /// New leaf with empty bitmap and unlinked (next/prev = EMPTY)
+    /// New leaf with empty bitmap and unlinked (next/prev = EMPTY_LINK)
     ///
     /// # Performance
     /// O(1) - simple initialization
@@ -84,8 +118,8 @@ impl Leaf {
                 AtomicU64::new(0),
             ],
             prefix,
-            next: EMPTY,
-            prev: EMPTY,
+            next: EMPTY_LINK,
+            prev: EMPTY_LINK,
         }
     }
 }
@@ -125,8 +159,8 @@ mod tests {
         assert_eq!(leaf.prefix, prefix);
 
         // Should be unlinked
-        assert_eq!(leaf.next, EMPTY);
-        assert_eq!(leaf.prev, EMPTY);
+        assert_eq!(leaf.next, EMPTY_LINK);
+        assert_eq!(leaf.prev, EMPTY_LINK);
     }
 
     #[test]
@@ -134,24 +168,53 @@ mod tests {
         use core::mem::size_of;
 
         // Verify expected memory layout
-        assert_eq!(size_of::<Leaf>(), 48); // 32 + 8 + 4 + 4 = 48 bytes
+        assert_eq!(size_of::<Leaf>(), 56); // 32 + 8 + 8 + 8 = 56 bytes
         assert_eq!(size_of::<[AtomicU64; 4]>(), 32);
         assert_eq!(size_of::<u64>(), 8);
-        assert_eq!(size_of::<u32>(), 4);
     }
 
     #[test]
     fn test_clone() {
         let mut leaf = Leaf::new(0x12345600);
         leaf.bitmap[0].store(0xFF, Ordering::Relaxed);
-        leaf.next = 42;
-        leaf.prev = 10;
+        leaf.next = pack_link(1, 42);
+        leaf.prev = pack_link(0, 10);
 
         let cloned = leaf.clone();
 
         assert_eq!(cloned.bitmap[0].load(Ordering::Relaxed), 0xFF);
         assert_eq!(cloned.prefix, 0x12345600);
-        assert_eq!(cloned.next, 42);
-        assert_eq!(cloned.prev, 10);
+        assert_eq!(cloned.next, pack_link(1, 42));
+        assert_eq!(cloned.prev, pack_link(0, 10));
+    }
+
+    #[test]
+    fn test_pack_unpack_link() {
+        // Test with various arena_idx and leaf_idx values
+        let test_cases = [
+            (0u64, 0u32),
+            (1, 42),
+            (0xFFFFFFFF, 0xFFFFFFFF),
+            (0x12345678, 0xABCDEF01),
+        ];
+
+        for (arena_idx, leaf_idx) in test_cases {
+            let packed = pack_link(arena_idx, leaf_idx);
+            let (unpacked_arena, unpacked_leaf) = unpack_link(packed);
+
+            // Note: arena_idx is truncated to u32
+            assert_eq!(unpacked_arena, arena_idx & 0xFFFFFFFF);
+            assert_eq!(unpacked_leaf, leaf_idx);
+        }
+    }
+
+    #[test]
+    fn test_empty_link() {
+        assert_eq!(EMPTY_LINK, u64::MAX);
+
+        // Verify EMPTY_LINK unpacks to max values
+        let (arena_idx, leaf_idx) = unpack_link(EMPTY_LINK);
+        assert_eq!(arena_idx, 0xFFFFFFFF);
+        assert_eq!(leaf_idx, 0xFFFFFFFF);
     }
 }

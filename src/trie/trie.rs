@@ -52,11 +52,11 @@ pub struct Trie<K: TrieKey> {
     /// Cached maximum key for O(1) access
     max_key: Option<K>,
 
-    /// Index of first leaf in linked list (EMPTY if no leaves)
-    first_leaf_idx: u32,
+    /// First leaf in linked list (packed: arena_idx << 32 | leaf_idx, or EMPTY_LINK if no leaves)
+    first_leaf: u64,
 
-    /// Index of last leaf in linked list (EMPTY if no leaves)
-    last_leaf_idx: u32,
+    /// Last leaf in linked list (packed: arena_idx << 32 | leaf_idx, or EMPTY_LINK if no leaves)
+    last_leaf: u64,
 
     /// Phantom data to associate with key type
     _phantom: core::marker::PhantomData<K>,
@@ -98,8 +98,8 @@ impl<K: TrieKey> Trie<K> {
             len: 0,
             min_key: None,
             max_key: None,
-            first_leaf_idx: crate::constants::EMPTY,
-            last_leaf_idx: crate::constants::EMPTY,
+            first_leaf: crate::trie::EMPTY_LINK,
+            last_leaf: crate::trie::EMPTY_LINK,
             _phantom: core::marker::PhantomData,
         }
     }
@@ -581,6 +581,8 @@ impl<K: TrieKey> Trie<K> {
 
     /// Internal helper for successor from leaf.
     fn successor_from_leaf_internal(&self, key: K, leaf_idx: u32, arena_idx: u64) -> Option<K> {
+        use crate::trie::{unpack_link, EMPTY_LINK};
+
         let leaf_arena = self.allocator.get_leaf_arena(arena_idx)?;
         let leaf = leaf_arena.get(leaf_idx);
 
@@ -594,8 +596,10 @@ impl<K: TrieKey> Trie<K> {
         }
 
         // Not in current leaf - try next leaf via linked list
-        if leaf.next != crate::constants::EMPTY {
-            let next_leaf = leaf_arena.get(leaf.next);
+        if leaf.next != EMPTY_LINK {
+            let (next_arena_idx, next_leaf_idx) = unpack_link(leaf.next);
+            let next_leaf_arena = self.allocator.get_leaf_arena(next_arena_idx)?;
+            let next_leaf = next_leaf_arena.get(next_leaf_idx);
             if let Some(min_bit) = crate::bitmap::min_bit(&next_leaf.bitmap) {
                 // Found in next leaf - O(1) for adjacent leaves!
                 let mut key_value = (next_leaf.prefix as u128) << 8;
@@ -768,6 +772,8 @@ impl<K: TrieKey> Trie<K> {
 
     /// Internal helper for predecessor from leaf.
     fn predecessor_from_leaf_internal(&self, key: K, leaf_idx: u32, arena_idx: u64) -> Option<K> {
+        use crate::trie::{unpack_link, EMPTY_LINK};
+
         let leaf_arena = self.allocator.get_leaf_arena(arena_idx)?;
         let leaf = leaf_arena.get(leaf_idx);
 
@@ -781,8 +787,10 @@ impl<K: TrieKey> Trie<K> {
         }
 
         // Not in current leaf - try prev leaf via linked list
-        if leaf.prev != crate::constants::EMPTY {
-            let prev_leaf = leaf_arena.get(leaf.prev);
+        if leaf.prev != EMPTY_LINK {
+            let (prev_arena_idx, prev_leaf_idx) = unpack_link(leaf.prev);
+            let prev_leaf_arena = self.allocator.get_leaf_arena(prev_arena_idx)?;
+            let prev_leaf = prev_leaf_arena.get(prev_leaf_idx);
             if let Some(max_bit) = crate::bitmap::max_bit(&prev_leaf.bitmap) {
                 // Found in prev leaf - O(1) for adjacent leaves!
                 let mut key_value = (prev_leaf.prefix as u128) << 8;
@@ -1061,7 +1069,7 @@ impl<K: TrieKey> Trie<K> {
             if let Some(idx) = child_idx {
                 // Child exists - move to it
                 current_node_idx = idx;
-                
+
                 // Check if we need to switch arena at split level
                 if K::SPLIT_LEVELS.contains(&(level + 1)) {
                     // Next level is a split level - get child_arena_idx from current node
@@ -1074,7 +1082,7 @@ impl<K: TrieKey> Trie<K> {
                 }
             } else {
                 // Child doesn't exist - create new node and link it
-                
+
                 // Allocate new node
                 let new_node_idx = {
                     let node_arena = self
@@ -1097,12 +1105,12 @@ impl<K: TrieKey> Trie<K> {
                 // If next level is a split level, allocate child arena
                 if K::SPLIT_LEVELS.contains(&(level + 1)) {
                     let child_arena_idx = key.arena_idx_at_level(level + 1);
-                    
+
                     // Allocate child arena if not exists
                     if !self.allocator.has_arena(child_arena_idx) {
                         self.allocator.allocate_arena_for_key(child_arena_idx);
                     }
-                    
+
                     // Set child_arena_idx in the new node
                     let node_arena = self
                         .allocator
@@ -1242,42 +1250,54 @@ impl<K: TrieKey> Trie<K> {
     /// 1. Get prev/next indices from the leaf being removed
     /// 2. Update prev leaf's next pointer to skip removed leaf
     /// 3. Update next leaf's prev pointer to skip removed leaf
-    /// 4. Update first_leaf_idx if removed leaf was first
-    /// 5. Update last_leaf_idx if removed leaf was last
+    /// 4. Update first_leaf if removed leaf was first
+    /// 5. Update last_leaf if removed leaf was last
     ///
     /// # Arguments
     /// * `leaf_idx` - Index of the leaf to remove from list
     /// * `arena_idx` - Arena index for storage
     ///
     /// # Performance
-    /// O(1) - direct pointer updates using prev/next fields
+    /// O(1) - direct pointer updates using prev/next fields, supports cross-arena
     fn unlink_leaf(&mut self, leaf_idx: u32, arena_idx: u64) {
+        use crate::trie::{unpack_link, EMPTY_LINK};
+
         let leaf_arena = self
             .allocator
-            .get_leaf_arena_mut(arena_idx)
+            .get_leaf_arena(arena_idx)
             .expect("Leaf arena should be allocated");
 
         // Get prev/next from the leaf being removed
         let leaf = leaf_arena.get(leaf_idx);
-        let prev_idx = leaf.prev;
-        let next_idx = leaf.next;
+        let prev_link = leaf.prev;
+        let next_link = leaf.next;
 
         // Update prev leaf's next pointer
-        if prev_idx == crate::constants::EMPTY {
-            // Removed leaf was first - update first_leaf_idx
-            self.first_leaf_idx = next_idx;
+        if prev_link == EMPTY_LINK {
+            // Removed leaf was first - update first_leaf
+            self.first_leaf = next_link;
         } else {
-            let prev_leaf = leaf_arena.get_mut(prev_idx);
-            prev_leaf.next = next_idx;
+            let (prev_arena_idx, prev_leaf_idx) = unpack_link(prev_link);
+            let prev_leaf_arena = self
+                .allocator
+                .get_leaf_arena_mut(prev_arena_idx)
+                .expect("Prev leaf arena should be allocated");
+            let prev_leaf = prev_leaf_arena.get_mut(prev_leaf_idx);
+            prev_leaf.next = next_link;
         }
 
         // Update next leaf's prev pointer
-        if next_idx == crate::constants::EMPTY {
-            // Removed leaf was last - update last_leaf_idx
-            self.last_leaf_idx = prev_idx;
+        if next_link == EMPTY_LINK {
+            // Removed leaf was last - update last_leaf
+            self.last_leaf = prev_link;
         } else {
-            let next_leaf = leaf_arena.get_mut(next_idx);
-            next_leaf.prev = prev_idx;
+            let (next_arena_idx, next_leaf_idx) = unpack_link(next_link);
+            let next_leaf_arena = self
+                .allocator
+                .get_leaf_arena_mut(next_arena_idx)
+                .expect("Next leaf arena should be allocated");
+            let next_leaf = next_leaf_arena.get_mut(next_leaf_idx);
+            next_leaf.prev = prev_link;
         }
     }
 
@@ -1285,15 +1305,15 @@ impl<K: TrieKey> Trie<K> {
     ///
     /// Links the newly created leaf into the doubly-linked list of leaves,
     /// maintaining sorted order by prefix. Updates next/prev pointers for
-    /// the new leaf and its neighbors, and updates first_leaf_idx/last_leaf_idx
+    /// the new leaf and its neighbors, and updates first_leaf/last_leaf
     /// if necessary.
     ///
     /// # Algorithm
-    /// 1. If this is the first leaf: set first_leaf_idx and last_leaf_idx
+    /// 1. If this is the first leaf: set first_leaf and last_leaf
     /// 2. Find prev/next leaves using trie backtracking (O(log log U))
     /// 3. Update new leaf's prev/next pointers
     /// 4. Update neighbors' pointers to link to new leaf
-    /// 5. Update first_leaf_idx/last_leaf_idx if at boundaries
+    /// 5. Update first_leaf/last_leaf if at boundaries
     ///
     /// # Arguments
     /// * `new_leaf_idx` - Index of the newly created leaf
@@ -1302,7 +1322,7 @@ impl<K: TrieKey> Trie<K> {
     /// * `arena_idx` - Arena index for storage
     ///
     /// # Performance
-    /// O(log log U) - uses trie structure to find neighbors efficiently
+    /// O(log log U) - uses trie structure to find neighbors efficiently, supports cross-arena
     fn link_leaf(
         &mut self,
         new_leaf_idx: u32,
@@ -1310,18 +1330,33 @@ impl<K: TrieKey> Trie<K> {
         path_len: usize,
         arena_idx: u64,
     ) {
+        use crate::trie::{pack_link, unpack_link, EMPTY_LINK};
+
         // Check if this is the first leaf
-        if self.first_leaf_idx == crate::constants::EMPTY {
+        if self.first_leaf == EMPTY_LINK {
             // First leaf ever - initialize list
-            self.first_leaf_idx = new_leaf_idx;
-            self.last_leaf_idx = new_leaf_idx;
-            // new leaf already has prev=EMPTY and next=EMPTY from Leaf::new()
+            let new_link = pack_link(arena_idx, new_leaf_idx);
+            self.first_leaf = new_link;
+            self.last_leaf = new_link;
+            // new leaf already has prev=EMPTY_LINK and next=EMPTY_LINK from Leaf::new()
             return;
         }
 
         // Find prev/next leaves using trie backtracking
         let prev_leaf_idx = self.find_prev_leaf(path, path_len, arena_idx);
         let next_leaf_idx = self.find_next_leaf(path, path_len, arena_idx);
+
+        // Pack prev/next links (they are in same arena as current leaf for now)
+        let prev_link = if prev_leaf_idx == crate::constants::EMPTY {
+            EMPTY_LINK
+        } else {
+            pack_link(arena_idx, prev_leaf_idx)
+        };
+        let next_link = if next_leaf_idx == crate::constants::EMPTY {
+            EMPTY_LINK
+        } else {
+            pack_link(arena_idx, next_leaf_idx)
+        };
 
         // Get leaf arena for updates
         let leaf_arena = self
@@ -1331,25 +1366,37 @@ impl<K: TrieKey> Trie<K> {
 
         // Update new leaf's pointers
         let new_leaf = leaf_arena.get_mut(new_leaf_idx);
-        new_leaf.prev = prev_leaf_idx;
-        new_leaf.next = next_leaf_idx;
+        new_leaf.prev = prev_link;
+        new_leaf.next = next_link;
+
+        let new_link = pack_link(arena_idx, new_leaf_idx);
 
         // Update prev leaf's next pointer
-        if prev_leaf_idx == crate::constants::EMPTY {
+        if prev_link == EMPTY_LINK {
             // New leaf is now first
-            self.first_leaf_idx = new_leaf_idx;
+            self.first_leaf = new_link;
         } else {
-            let prev_leaf = leaf_arena.get_mut(prev_leaf_idx);
-            prev_leaf.next = new_leaf_idx;
+            let (prev_arena_idx, prev_leaf_idx) = unpack_link(prev_link);
+            let prev_leaf_arena = self
+                .allocator
+                .get_leaf_arena_mut(prev_arena_idx)
+                .expect("Prev leaf arena should be allocated");
+            let prev_leaf = prev_leaf_arena.get_mut(prev_leaf_idx);
+            prev_leaf.next = new_link;
         }
 
         // Update next leaf's prev pointer
-        if next_leaf_idx == crate::constants::EMPTY {
+        if next_link == EMPTY_LINK {
             // New leaf is now last
-            self.last_leaf_idx = new_leaf_idx;
+            self.last_leaf = new_link;
         } else {
-            let next_leaf = leaf_arena.get_mut(next_leaf_idx);
-            next_leaf.prev = new_leaf_idx;
+            let (next_arena_idx, next_leaf_idx) = unpack_link(next_link);
+            let next_leaf_arena = self
+                .allocator
+                .get_leaf_arena_mut(next_arena_idx)
+                .expect("Next leaf arena should be allocated");
+            let next_leaf = next_leaf_arena.get_mut(next_leaf_idx);
+            next_leaf.prev = new_link;
         }
     }
 
