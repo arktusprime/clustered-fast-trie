@@ -545,12 +545,12 @@ impl<K: TrieKey> Trie<K> {
             }
         }
 
-        // Get segment metadata
+        // Get root arena
         let segment_meta = self.allocator.get_segment_meta(self.root_segment)?;
-        let arena_idx = segment_meta.cache_key;
+        let mut current_arena_idx = segment_meta.cache_key;
 
         // Get node arena
-        let node_arena = self.allocator.get_node_arena(arena_idx)?;
+        let node_arena = self.allocator.get_node_arena(current_arena_idx)?;
         if node_arena.is_empty() {
             return None;
         }
@@ -566,14 +566,29 @@ impl<K: TrieKey> Trie<K> {
             path[path_len] = (current_node_idx, byte);
             path_len += 1;
 
+            // Get current node arena (may have changed at split level)
+            let node_arena = self.allocator.get_node_arena(current_arena_idx)?;
             let current_node = node_arena.get(current_node_idx);
 
             if !current_node.has_child(byte) {
                 // Path doesn't exist → backtrack to find next leaf
-                return self.successor_backtrack(key, &path, path_len, arena_idx);
+                return self.successor_backtrack(key, &path, path_len, current_arena_idx);
             }
 
             current_node_idx = current_node.get_child(byte);
+
+            // Check if we need to switch arenas at split level
+            if K::SPLIT_LEVELS.contains(&level) {
+                // Get child arena index from current node
+                let child_arena_idx = current_node.child_arena_idx as u64;
+                
+                // Check if child arena exists
+                if !self.allocator.has_arena(child_arena_idx) {
+                    return None; // Child arena not allocated
+                }
+                
+                current_arena_idx = child_arena_idx;
+            }
         }
 
         // Final level: check if leaf exists
@@ -581,17 +596,18 @@ impl<K: TrieKey> Trie<K> {
         path[path_len] = (current_node_idx, last_node_byte);
         path_len += 1;
 
+        let node_arena = self.allocator.get_node_arena(current_arena_idx)?;
         let final_node = node_arena.get(current_node_idx);
 
         if !final_node.has_child(last_node_byte) {
             // Leaf doesn't exist → backtrack to find next leaf
-            return self.successor_backtrack(key, &path, path_len, arena_idx);
+            return self.successor_backtrack(key, &path, path_len, current_arena_idx);
         }
 
         let leaf_idx = final_node.get_child(last_node_byte);
 
         // Leaf exists → search in leaf and next
-        self.successor_from_leaf_internal(key, leaf_idx, arena_idx)
+        self.successor_from_leaf_internal(key, leaf_idx, current_arena_idx)
     }
 
     /// Find successor starting from a specific leaf (for bulk operations).
@@ -736,12 +752,12 @@ impl<K: TrieKey> Trie<K> {
             }
         }
 
-        // Get segment metadata
+        // Get root arena
         let segment_meta = self.allocator.get_segment_meta(self.root_segment)?;
-        let arena_idx = segment_meta.cache_key;
+        let mut current_arena_idx = segment_meta.cache_key;
 
         // Get node arena
-        let node_arena = self.allocator.get_node_arena(arena_idx)?;
+        let node_arena = self.allocator.get_node_arena(current_arena_idx)?;
         if node_arena.is_empty() {
             return None;
         }
@@ -757,14 +773,29 @@ impl<K: TrieKey> Trie<K> {
             path[path_len] = (current_node_idx, byte);
             path_len += 1;
 
+            // Get current node arena (may have changed at split level)
+            let node_arena = self.allocator.get_node_arena(current_arena_idx)?;
             let current_node = node_arena.get(current_node_idx);
 
             if !current_node.has_child(byte) {
                 // Path doesn't exist → backtrack to find prev leaf
-                return self.predecessor_backtrack(key, &path, path_len, arena_idx);
+                return self.predecessor_backtrack(key, &path, path_len, current_arena_idx);
             }
 
             current_node_idx = current_node.get_child(byte);
+
+            // Check if we need to switch arenas at split level
+            if K::SPLIT_LEVELS.contains(&level) {
+                // Get child arena index from current node
+                let child_arena_idx = current_node.child_arena_idx as u64;
+                
+                // Check if child arena exists
+                if !self.allocator.has_arena(child_arena_idx) {
+                    return None; // Child arena not allocated
+                }
+                
+                current_arena_idx = child_arena_idx;
+            }
         }
 
         // Final level: check if leaf exists
@@ -772,17 +803,18 @@ impl<K: TrieKey> Trie<K> {
         path[path_len] = (current_node_idx, last_node_byte);
         path_len += 1;
 
+        let node_arena = self.allocator.get_node_arena(current_arena_idx)?;
         let final_node = node_arena.get(current_node_idx);
 
         if !final_node.has_child(last_node_byte) {
             // Leaf doesn't exist → backtrack to find prev leaf
-            return self.predecessor_backtrack(key, &path, path_len, arena_idx);
+            return self.predecessor_backtrack(key, &path, path_len, current_arena_idx);
         }
 
         let leaf_idx = final_node.get_child(last_node_byte);
 
         // Leaf exists → search in leaf and prev
-        self.predecessor_from_leaf_internal(key, leaf_idx, arena_idx)
+        self.predecessor_from_leaf_internal(key, leaf_idx, current_arena_idx)
     }
 
     /// Find predecessor starting from a specific leaf (for bulk operations).
