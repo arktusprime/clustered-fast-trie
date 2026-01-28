@@ -285,15 +285,15 @@ impl<K: TrieKey> Trie<K> {
     /// assert!(!trie.remove(42));  // Key no longer exists
     /// ```
     pub fn remove(&mut self, key: K) -> bool {
-        // Step 1: Check if arenas are allocated
+        // Step 1: Get root arena
         let segment_meta = match self.allocator.get_segment_meta(self.root_segment) {
             Some(meta) => meta,
             None => return false, // Segment doesn't exist
         };
-        let arena_idx = segment_meta.cache_key;
+        let mut current_arena_idx = segment_meta.cache_key;
 
         // Step 2: Check if node arena exists and has root node
-        let node_arena = match self.allocator.get_node_arena(arena_idx) {
+        let node_arena = match self.allocator.get_node_arena(current_arena_idx) {
             Some(arena) => arena,
             None => return false, // Node arena not allocated
         };
@@ -302,7 +302,7 @@ impl<K: TrieKey> Trie<K> {
             return false; // No root node exists
         }
 
-        // Step 3: Traverse trie levels to find leaf, tracking path
+        // Step 3: Traverse trie levels to find leaf, tracking path and arena switches
         let mut path: [(u32, u8); 16] = [(0, 0); 16]; // Max 16 levels for u128
         let mut path_len = 0;
         let mut current_node_idx = 0; // Start at root
@@ -313,6 +313,11 @@ impl<K: TrieKey> Trie<K> {
             path[path_len] = (current_node_idx, byte);
             path_len += 1;
 
+            // Get current node arena (may have changed at split level)
+            let node_arena = match self.allocator.get_node_arena(current_arena_idx) {
+                Some(arena) => arena,
+                None => return false,
+            };
             let current_node = node_arena.get(current_node_idx);
 
             if !current_node.has_child(byte) {
@@ -320,6 +325,19 @@ impl<K: TrieKey> Trie<K> {
             }
 
             current_node_idx = current_node.get_child(byte);
+
+            // Check if we need to switch arenas at split level
+            if K::SPLIT_LEVELS.contains(&level) {
+                // Get child arena index from current node
+                let child_arena_idx = current_node.child_arena_idx as u64;
+                
+                // Check if child arena exists
+                if !self.allocator.has_arena(child_arena_idx) {
+                    return false; // Child arena not allocated
+                }
+                
+                current_arena_idx = child_arena_idx;
+            }
         }
 
         // Final level: check if leaf exists
@@ -327,6 +345,10 @@ impl<K: TrieKey> Trie<K> {
         path[path_len] = (current_node_idx, last_node_byte);
         path_len += 1;
 
+        let node_arena = match self.allocator.get_node_arena(current_arena_idx) {
+            Some(arena) => arena,
+            None => return false,
+        };
         let final_node = node_arena.get(current_node_idx);
 
         if !final_node.has_child(last_node_byte) {
@@ -336,13 +358,13 @@ impl<K: TrieKey> Trie<K> {
         let leaf_idx = final_node.get_child(last_node_byte);
 
         // Step 4: Check if leaf arena exists
-        let leaf_arena = match self.allocator.get_leaf_arena_mut(arena_idx) {
+        let leaf_arena = match self.allocator.get_leaf_arena_mut(current_arena_idx) {
             Some(arena) => arena,
             None => return false, // Leaf arena not allocated
         };
 
         // Step 5: Clear bit in leaf bitmap
-        let was_removed = self.clear_bit_in_leaf(key, leaf_idx, arena_idx);
+        let was_removed = self.clear_bit_in_leaf(key, leaf_idx, current_arena_idx);
 
         if !was_removed {
             return false;
@@ -352,7 +374,7 @@ impl<K: TrieKey> Trie<K> {
         let is_leaf_empty = {
             let leaf_arena = self
                 .allocator
-                .get_leaf_arena(arena_idx)
+                .get_leaf_arena(current_arena_idx)
                 .expect("Leaf arena should be allocated");
             let leaf = leaf_arena.get(leaf_idx);
             crate::bitmap::is_empty(&leaf.bitmap)
@@ -360,23 +382,23 @@ impl<K: TrieKey> Trie<K> {
 
         if is_leaf_empty {
             // Unlink leaf from linked list
-            self.unlink_leaf(leaf_idx, arena_idx);
+            self.unlink_leaf(leaf_idx, current_arena_idx);
 
             // Remove link from parent node
             {
                 let node_arena = self
                     .allocator
-                    .get_node_arena_mut(arena_idx)
+                    .get_node_arena_mut(current_arena_idx)
                     .expect("Node arena should be allocated");
                 let parent_node = node_arena.get_mut(current_node_idx);
                 parent_node.clear_child(last_node_byte);
             }
 
             // Free the leaf
-            self.allocator.free_leaf(arena_idx, leaf_idx);
+            self.allocator.free_leaf(current_arena_idx, leaf_idx);
 
             // Cleanup empty nodes up the path
-            self.cleanup_empty_nodes(&path, path_len - 1, arena_idx);
+            self.cleanup_empty_nodes(&path, path_len - 1, current_arena_idx);
         }
 
         // Step 7: Update cache
