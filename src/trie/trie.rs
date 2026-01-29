@@ -143,29 +143,21 @@ impl<K: TrieKey> Trie<K> {
     /// assert!(!trie.insert(42));  // Already exists
     /// ```
     pub fn insert(&mut self, key: K) -> bool {
-        // Step 1: Ensure arenas are allocated
-        if let Err(_) = self.allocator.allocate_arena(self.root_segment) {
-            return false; // Failed to allocate arenas
-        }
+        // Step 1: Root arenas are already initialized in new()
+        // Arena index 0 always refers to root arenas in root_node.child_arenas
+        let arena_idx = 0u64;
 
-        // Step 2: Get segment metadata
-        let segment_meta = self
-            .allocator
-            .get_segment_meta(self.root_segment)
-            .expect("Segment should exist");
-        let arena_idx = segment_meta.cache_key;
+        // Step 2: Ensure root node exists (index 0 in node arena)
+        let root_node_idx = self.ensure_root_node();
 
-        // Step 3: Ensure root node exists (index 0 in node arena)
-        let root_node_idx = self.ensure_root_node(arena_idx);
-
-        // Step 4: Traverse trie levels to find/create path to leaf
+        // Step 3: Traverse trie levels to find/create path to leaf
         let (leaf_idx, _path, _path_len, arena_idx) =
             self.traverse_to_leaf(key, root_node_idx, arena_idx);
 
-        // Step 5: Set bit in leaf bitmap
+        // Step 4: Set bit in leaf bitmap
         let was_new = self.set_bit_in_leaf(key, leaf_idx, arena_idx);
 
-        // Step 6: Update cache if new insertion
+        // Step 5: Update cache if new insertion
         if was_new {
             self.len += 1;
             self.update_min_max_insert(key);
@@ -200,14 +192,14 @@ impl<K: TrieKey> Trie<K> {
     /// ```
     pub fn contains(&self, key: K) -> bool {
         // Step 1: Get root arena
-        let segment_meta = match self.allocator.get_segment_meta(self.root_segment) {
+        let segment_meta = match self.segment_manager.get_segment_meta(self.root_segment) {
             Some(meta) => meta,
             None => return false, // Segment doesn't exist
         };
         let mut current_arena_idx = segment_meta.cache_key;
 
         // Step 2: Check if node arena exists and has root node
-        let node_arena = match self.allocator.get_node_arena(current_arena_idx) {
+        let node_arena = match self.get_node_arena(current_arena_idx) {
             Some(arena) => arena,
             None => return false, // Node arena not allocated
         };
@@ -224,7 +216,7 @@ impl<K: TrieKey> Trie<K> {
             let byte = key.byte_at(level);
 
             // Get current node arena (may have changed at split level)
-            let node_arena = match self.allocator.get_node_arena(current_arena_idx) {
+            let node_arena = match self.get_node_arena(current_arena_idx) {
                 Some(arena) => arena,
                 None => return false,
             };
@@ -240,7 +232,7 @@ impl<K: TrieKey> Trie<K> {
                 let child_arena_idx = current_node.child_arena_idx as u64;
 
                 // Check if child arena exists
-                if !self.allocator.has_arena(child_arena_idx) {
+                if !self.has_arena(child_arena_idx) {
                     return false; // Child arena not allocated
                 }
 
@@ -253,7 +245,7 @@ impl<K: TrieKey> Trie<K> {
 
         // Final level: check if leaf exists
         let last_node_byte = key.byte_at(K::LEVELS - 1);
-        let node_arena = match self.allocator.get_node_arena(current_arena_idx) {
+        let node_arena = match self.get_node_arena(current_arena_idx) {
             Some(arena) => arena,
             None => return false,
         };
@@ -266,7 +258,7 @@ impl<K: TrieKey> Trie<K> {
         let leaf_idx = final_node.get_child(last_node_byte);
 
         // Step 4: Check if leaf arena exists
-        let leaf_arena = match self.allocator.get_leaf_arena(current_arena_idx) {
+        let leaf_arena = match self.get_leaf_arena(current_arena_idx) {
             Some(arena) => arena,
             None => return false, // Leaf arena not allocated
         };
@@ -1142,11 +1134,14 @@ impl<K: TrieKey> Trie<K> {
     #[inline]
     fn get_node_arena(&self, arena_idx: u64) -> Option<&crate::arena::Arena<crate::trie::Node>> {
         if arena_idx == 0 {
-            // Root arenas stored in Trie.root_node.child_arenas
-            self.allocator.get_node_arena(arena_idx)
+            // Root arenas stored in root_node
+            self.root_node
+                .child_arenas
+                .as_ref()
+                .map(|ca| &ca.node_arena)
         } else {
             // TODO Phase 4: Child arenas - need path-based lookup
-            self.allocator.get_node_arena(arena_idx)
+            None
         }
     }
 
@@ -1167,11 +1162,14 @@ impl<K: TrieKey> Trie<K> {
         arena_idx: u64,
     ) -> Option<&mut crate::arena::Arena<crate::trie::Node>> {
         if arena_idx == 0 {
-            // Root arenas stored in Trie.root_node.child_arenas
-            self.allocator.get_node_arena_mut(arena_idx)
+            // Root arenas stored in root_node
+            self.root_node
+                .child_arenas
+                .as_mut()
+                .map(|ca| &mut ca.node_arena)
         } else {
             // TODO Phase 4: Child arenas - need path-based lookup
-            self.allocator.get_node_arena_mut(arena_idx)
+            None
         }
     }
 
@@ -1189,11 +1187,14 @@ impl<K: TrieKey> Trie<K> {
     #[inline]
     fn get_leaf_arena(&self, arena_idx: u64) -> Option<&crate::arena::Arena<crate::trie::Leaf>> {
         if arena_idx == 0 {
-            // Root arenas stored in Trie.root_node.child_arenas
-            self.allocator.get_leaf_arena(arena_idx)
+            // Root arenas stored in root_node
+            self.root_node
+                .child_arenas
+                .as_ref()
+                .map(|ca| &ca.leaf_arena)
         } else {
             // TODO Phase 4: Child arenas - need path-based lookup
-            self.allocator.get_leaf_arena(arena_idx)
+            None
         }
     }
 
@@ -1214,11 +1215,14 @@ impl<K: TrieKey> Trie<K> {
         arena_idx: u64,
     ) -> Option<&mut crate::arena::Arena<crate::trie::Leaf>> {
         if arena_idx == 0 {
-            // Root arenas stored in Trie.root_node.child_arenas
-            self.allocator.get_leaf_arena_mut(arena_idx)
+            // Root arenas stored in root_node
+            self.root_node
+                .child_arenas
+                .as_mut()
+                .map(|ca| &mut ca.leaf_arena)
         } else {
             // TODO Phase 4: Child arenas - need path-based lookup
-            self.allocator.get_leaf_arena_mut(arena_idx)
+            None
         }
     }
 
@@ -1236,11 +1240,11 @@ impl<K: TrieKey> Trie<K> {
     #[inline]
     fn has_arena(&self, arena_idx: u64) -> bool {
         if arena_idx == 0 {
-            // Root arenas stored in Trie.root_node.child_arenas
-            self.allocator.has_arena(arena_idx)
+            // Root arenas stored in root_node
+            self.root_node.child_arenas.is_some()
         } else {
             // TODO Phase 4: Child arenas - need path-based lookup
-            self.allocator.has_arena(arena_idx)
+            false
         }
     }
 
@@ -1249,15 +1253,21 @@ impl<K: TrieKey> Trie<K> {
     // ============================================================================
 
     /// Ensure root node exists at index 0 in node arena.
-    fn ensure_root_node(&mut self, arena_idx: u64) -> u32 {
-        let node_arena = self
-            .allocator
-            .get_node_arena_mut(arena_idx)
-            .expect("Node arena should be allocated");
+    ///
+    /// Root node is always stored at index 0 in root_node.child_arenas.node_arena.
+    ///
+    /// # Returns
+    /// Always returns 0 (root node index)
+    ///
+    /// # Performance
+    /// O(1) - checks if arena is empty and allocates root node if needed
+    fn ensure_root_node(&mut self) -> u32 {
+        let root_arenas = self.root_node.child_arenas.as_mut()
+            .expect("Root node should have child arenas");
 
-        if node_arena.is_empty() {
+        if root_arenas.node_arena.is_empty() {
             // Create root node at index 0
-            node_arena.alloc()
+            root_arenas.node_arena.alloc()
         } else {
             // Root node already exists at index 0
             0
