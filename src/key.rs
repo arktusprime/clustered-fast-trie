@@ -330,8 +330,8 @@ impl TrieKey for u128 {
         } else {
             // Extract bytes 0-11 (upper 12 bytes)
             // This is: (bytes 0-7 << 32) | (bytes 8-11)
-            let upper = (self >> 64) as u64;  // bytes 0-7
-            let mid = ((self >> 32) & 0xFFFFFFFF) as u64;  // bytes 8-11
+            let upper = (self >> 64) as u64; // bytes 0-7
+            let mid = ((self >> 32) & 0xFFFFFFFF) as u64; // bytes 8-11
             (upper << 32) | mid
         }
     }

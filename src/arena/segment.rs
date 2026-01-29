@@ -170,12 +170,12 @@ impl SegmentMeta {
     pub fn arena_at_level<K: TrieKey>(&self, key: K, level: usize) -> u64 {
         // Normalize key first
         let normalized_key = self.normalize_key(key);
-        
+
         // Root levels: use cache_key
         if K::SPLIT_LEVELS.is_empty() || level < K::SPLIT_LEVELS[0] {
             return self.cache_key;
         }
-        
+
         // Child levels: calculate from normalized key
         normalized_key.arena_idx_at_level(level)
     }

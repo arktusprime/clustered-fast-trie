@@ -101,9 +101,7 @@ impl SegmentManager {
     /// O(1) - direct Vec indexing
     pub fn get_segment_meta_mut(&mut self, segment_id: SegmentId) -> Option<&mut SegmentMeta> {
         let perm_key = segment_id as usize;
-        self.segments
-            .get_mut(perm_key)
-            .and_then(|opt| opt.as_mut())
+        self.segments.get_mut(perm_key).and_then(|opt| opt.as_mut())
     }
 
     /// Get segment cache by segment ID.

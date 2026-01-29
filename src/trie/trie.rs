@@ -207,7 +207,7 @@ impl<K: TrieKey> Trie<K> {
         // Traverse internal levels (0..K::LEVELS-1)
         for level in 0..(K::LEVELS - 1) {
             let byte = key.byte_at(level);
-            
+
             // Get current node arena (may have changed at split level)
             let node_arena = match self.allocator.get_node_arena(current_arena_idx) {
                 Some(arena) => arena,
@@ -223,12 +223,12 @@ impl<K: TrieKey> Trie<K> {
             if K::SPLIT_LEVELS.contains(&(level + 1)) {
                 // Next level is a split level - get child arena index from CURRENT node (parent)
                 let child_arena_idx = current_node.child_arena_idx as u64;
-                
+
                 // Check if child arena exists
                 if !self.allocator.has_arena(child_arena_idx) {
                     return false; // Child arena not allocated
                 }
-                
+
                 current_arena_idx = child_arena_idx;
             }
 
@@ -331,12 +331,12 @@ impl<K: TrieKey> Trie<K> {
             if K::SPLIT_LEVELS.contains(&(level + 1)) {
                 // Next level is a split level - get child arena index from current node
                 let child_arena_idx = current_node.child_arena_idx as u64;
-                
+
                 // Check if child arena exists
                 if !self.allocator.has_arena(child_arena_idx) {
                     return false; // Child arena not allocated
                 }
-                
+
                 current_arena_idx = child_arena_idx;
             }
         }
@@ -582,12 +582,12 @@ impl<K: TrieKey> Trie<K> {
             if K::SPLIT_LEVELS.contains(&(level + 1)) {
                 // Next level is a split level - get child arena index from current node
                 let child_arena_idx = current_node.child_arena_idx as u64;
-                
+
                 // Check if child arena exists
                 if !self.allocator.has_arena(child_arena_idx) {
                     return None; // Child arena not allocated
                 }
-                
+
                 current_arena_idx = child_arena_idx;
             }
         }
@@ -792,12 +792,12 @@ impl<K: TrieKey> Trie<K> {
             if K::SPLIT_LEVELS.contains(&(level + 1)) {
                 // Next level is a split level - get child arena index from current node
                 let child_arena_idx = current_node.child_arena_idx as u64;
-                
+
                 // Check if child arena exists
                 if !self.allocator.has_arena(child_arena_idx) {
                     return None; // Child arena not allocated
                 }
-                
+
                 current_arena_idx = child_arena_idx;
             }
         }
@@ -1001,12 +1001,12 @@ impl<K: TrieKey> Trie<K> {
             if K::SPLIT_LEVELS.contains(&(level + 1)) {
                 // Next level is a split level - get child arena index from current node
                 let child_arena_idx = node.child_arena_idx as u64;
-                
+
                 // Check if child arena exists
                 if !self.allocator.has_arena(child_arena_idx) {
                     return None; // Child arena not allocated
                 }
-                
+
                 current_arena_idx = child_arena_idx;
             }
         }
@@ -1072,12 +1072,12 @@ impl<K: TrieKey> Trie<K> {
             if K::SPLIT_LEVELS.contains(&(level + 1)) {
                 // Next level is a split level - get child arena index from current node
                 let child_arena_idx = node.child_arena_idx as u64;
-                
+
                 // Check if child arena exists
                 if !self.allocator.has_arena(child_arena_idx) {
                     return None; // Child arena not allocated
                 }
-                
+
                 current_arena_idx = child_arena_idx;
             }
         }
@@ -1101,6 +1101,137 @@ impl<K: TrieKey> Trie<K> {
         // Convert u128 back to key type K
         Some(K::from_u128(key_value))
     }
+
+    // ============================================================================
+    // Arena Access Helper Methods
+    // ============================================================================
+    //
+    // These methods provide unified access to arenas regardless of whether they
+    // are root arenas (stored in Trie.root_node.child_arenas) or child arenas
+    // (stored in nodes at split levels).
+    //
+    // Current implementation (Phase 1): Only supports root arenas (arena_idx = 0).
+    // Future implementation (Phase 4): Will support child arenas via path traversal.
+
+    /// Get immutable reference to node arena.
+    ///
+    /// # Arguments
+    /// * `arena_idx` - Arena index (0 = root arenas, >0 = child arenas)
+    ///
+    /// # Returns
+    /// Reference to node arena, or None if arena doesn't exist
+    ///
+    /// # Current Limitations
+    /// Only supports arena_idx = 0 (root arenas). Child arenas (arena_idx > 0)
+    /// will be supported in Phase 4 after implementing path-based arena lookup.
+    #[inline]
+    fn get_node_arena(&self, arena_idx: u64) -> Option<&crate::arena::Arena<crate::trie::Node>> {
+        if arena_idx == 0 {
+            // Root arenas stored in Trie.root_node.child_arenas
+            self.allocator.get_node_arena(arena_idx)
+        } else {
+            // TODO Phase 4: Child arenas - need path-based lookup
+            self.allocator.get_node_arena(arena_idx)
+        }
+    }
+
+    /// Get mutable reference to node arena.
+    ///
+    /// # Arguments
+    /// * `arena_idx` - Arena index (0 = root arenas, >0 = child arenas)
+    ///
+    /// # Returns
+    /// Mutable reference to node arena, or None if arena doesn't exist
+    ///
+    /// # Current Limitations
+    /// Only supports arena_idx = 0 (root arenas). Child arenas (arena_idx > 0)
+    /// will be supported in Phase 4 after implementing path-based arena lookup.
+    #[inline]
+    fn get_node_arena_mut(
+        &mut self,
+        arena_idx: u64,
+    ) -> Option<&mut crate::arena::Arena<crate::trie::Node>> {
+        if arena_idx == 0 {
+            // Root arenas stored in Trie.root_node.child_arenas
+            self.allocator.get_node_arena_mut(arena_idx)
+        } else {
+            // TODO Phase 4: Child arenas - need path-based lookup
+            self.allocator.get_node_arena_mut(arena_idx)
+        }
+    }
+
+    /// Get immutable reference to leaf arena.
+    ///
+    /// # Arguments
+    /// * `arena_idx` - Arena index (0 = root arenas, >0 = child arenas)
+    ///
+    /// # Returns
+    /// Reference to leaf arena, or None if arena doesn't exist
+    ///
+    /// # Current Limitations
+    /// Only supports arena_idx = 0 (root arenas). Child arenas (arena_idx > 0)
+    /// will be supported in Phase 4 after implementing path-based arena lookup.
+    #[inline]
+    fn get_leaf_arena(&self, arena_idx: u64) -> Option<&crate::arena::Arena<crate::trie::Leaf>> {
+        if arena_idx == 0 {
+            // Root arenas stored in Trie.root_node.child_arenas
+            self.allocator.get_leaf_arena(arena_idx)
+        } else {
+            // TODO Phase 4: Child arenas - need path-based lookup
+            self.allocator.get_leaf_arena(arena_idx)
+        }
+    }
+
+    /// Get mutable reference to leaf arena.
+    ///
+    /// # Arguments
+    /// * `arena_idx` - Arena index (0 = root arenas, >0 = child arenas)
+    ///
+    /// # Returns
+    /// Mutable reference to leaf arena, or None if arena doesn't exist
+    ///
+    /// # Current Limitations
+    /// Only supports arena_idx = 0 (root arenas). Child arenas (arena_idx > 0)
+    /// will be supported in Phase 4 after implementing path-based arena lookup.
+    #[inline]
+    fn get_leaf_arena_mut(
+        &mut self,
+        arena_idx: u64,
+    ) -> Option<&mut crate::arena::Arena<crate::trie::Leaf>> {
+        if arena_idx == 0 {
+            // Root arenas stored in Trie.root_node.child_arenas
+            self.allocator.get_leaf_arena_mut(arena_idx)
+        } else {
+            // TODO Phase 4: Child arenas - need path-based lookup
+            self.allocator.get_leaf_arena_mut(arena_idx)
+        }
+    }
+
+    /// Check if arena exists.
+    ///
+    /// # Arguments
+    /// * `arena_idx` - Arena index (0 = root arenas, >0 = child arenas)
+    ///
+    /// # Returns
+    /// true if arena exists, false otherwise
+    ///
+    /// # Current Limitations
+    /// Only supports arena_idx = 0 (root arenas). Child arenas (arena_idx > 0)
+    /// will be supported in Phase 4 after implementing path-based arena lookup.
+    #[inline]
+    fn has_arena(&self, arena_idx: u64) -> bool {
+        if arena_idx == 0 {
+            // Root arenas stored in Trie.root_node.child_arenas
+            self.allocator.has_arena(arena_idx)
+        } else {
+            // TODO Phase 4: Child arenas - need path-based lookup
+            self.allocator.has_arena(arena_idx)
+        }
+    }
+
+    // ============================================================================
+    // End of Arena Access Helper Methods
+    // ============================================================================
 
     /// Ensure root node exists at index 0 in node arena.
     fn ensure_root_node(&mut self, arena_idx: u64) -> u32 {
@@ -1199,7 +1330,7 @@ impl<K: TrieKey> Trie<K> {
                     // we set it properly - compute and set it now
                     if child_arena_idx == 0 {
                         let computed_arena_idx = key.arena_idx_at_level(level + 1);
-                        
+
                         // Allocate child arena if not exists
                         if !self.allocator.has_arena(computed_arena_idx) {
                             self.allocator.allocate_arena_for_key(computed_arena_idx);
@@ -1212,7 +1343,7 @@ impl<K: TrieKey> Trie<K> {
                             .expect("Node arena should be allocated");
                         let current_node = node_arena.get_mut(current_node_idx);
                         current_node.child_arena_idx = computed_arena_idx as u32;
-                        
+
                         current_arena_idx = computed_arena_idx;
                     } else {
                         current_arena_idx = child_arena_idx;
@@ -1229,12 +1360,12 @@ impl<K: TrieKey> Trie<K> {
                 let (target_arena_idx, is_split_level) = if K::SPLIT_LEVELS.contains(&(level + 1)) {
                     // Next level is split - new node goes to child arena
                     let child_arena_idx = key.arena_idx_at_level(level + 1);
-                    
+
                     // Allocate child arena if not exists
                     if !self.allocator.has_arena(child_arena_idx) {
                         self.allocator.allocate_arena_for_key(child_arena_idx);
                     }
-                    
+
                     (child_arena_idx, true)
                 } else {
                     (current_arena_idx, false)
@@ -1267,7 +1398,7 @@ impl<K: TrieKey> Trie<K> {
                         .expect("Node arena should be allocated");
                     let current_node = node_arena.get_mut(current_node_idx);
                     current_node.set_child(byte, new_node_idx);
-                    
+
                     // If we're creating a node in child arena, store child_arena_idx in parent
                     if is_split_level {
                         current_node.child_arena_idx = target_arena_idx as u32;
@@ -1554,7 +1685,7 @@ impl<K: TrieKey> Trie<K> {
         // Backtrack through path to find predecessor branch
         for i in (0..path_len).rev() {
             let (node_idx, byte, arena_idx) = path[i];
-            
+
             let node_arena = match self.allocator.get_node_arena(arena_idx) {
                 Some(arena) => arena,
                 None => continue,
@@ -1565,7 +1696,7 @@ impl<K: TrieKey> Trie<K> {
             if let Some(pred_byte) = node.predecessor_child(byte) {
                 // Found predecessor branch - descend to maximum leaf
                 let pred_child_idx = node.get_child(pred_byte);
-                
+
                 // Check if next level is a split level - need to switch arena
                 let next_arena_idx = if K::SPLIT_LEVELS.contains(&(i + 1)) {
                     // Get child_arena_idx from the node we're descending into
@@ -1577,7 +1708,7 @@ impl<K: TrieKey> Trie<K> {
                 } else {
                     arena_idx
                 };
-                
+
                 return self.find_max_leaf_from(pred_child_idx, i + 1, next_arena_idx);
             }
         }
@@ -1607,7 +1738,7 @@ impl<K: TrieKey> Trie<K> {
         // Backtrack through path to find successor branch
         for i in (0..path_len).rev() {
             let (node_idx, byte, arena_idx) = path[i];
-            
+
             let node_arena = match self.allocator.get_node_arena(arena_idx) {
                 Some(arena) => arena,
                 None => continue,
@@ -1618,7 +1749,7 @@ impl<K: TrieKey> Trie<K> {
             if let Some(succ_byte) = node.successor_child(byte) {
                 // Found successor branch - descend to minimum leaf
                 let succ_child_idx = node.get_child(succ_byte);
-                
+
                 // Check if next level is a split level - need to switch arena
                 let next_arena_idx = if K::SPLIT_LEVELS.contains(&(i + 1)) {
                     // Get child_arena_idx from the node we're descending into
@@ -1630,7 +1761,7 @@ impl<K: TrieKey> Trie<K> {
                 } else {
                     arena_idx
                 };
-                
+
                 return self.find_min_leaf_from(succ_child_idx, i + 1, next_arena_idx);
             }
         }
@@ -1664,7 +1795,7 @@ impl<K: TrieKey> Trie<K> {
                 Some(arena) => arena,
                 None => return EMPTY_LINK,
             };
-            
+
             let node = node_arena.get(node_idx);
             let min_byte = match node.min_child() {
                 Some(b) => b,
@@ -1722,7 +1853,7 @@ impl<K: TrieKey> Trie<K> {
                 Some(arena) => arena,
                 None => return EMPTY_LINK,
             };
-            
+
             let node = node_arena.get(node_idx);
             let max_byte = match node.max_child() {
                 Some(b) => b,
@@ -1839,9 +1970,9 @@ impl<K: TrieKey> Default for Trie<K> {
 #[cfg(test)]
 mod tests {
     extern crate std;
-    use std::println;
-    use std::eprintln;
     use super::*;
+    use std::eprintln;
+    use std::println;
 
     #[test]
     fn test_new_trie_u32() {
@@ -2079,10 +2210,22 @@ mod tests {
         eprintln!("Insert key4: {}", r4);
 
         // Debug arena state
-        eprintln!("Root arena nodes: {:?}", trie.allocator.get_node_arena(0).map(|a| a.len()));
-        eprintln!("Root arena leaves: {:?}", trie.allocator.get_leaf_arena(0).map(|a| a.len()));
-        eprintln!("Child arena 0x01020304 nodes: {:?}", trie.allocator.get_node_arena(0x01020304).map(|a| a.len()));
-        eprintln!("Child arena 0x01020304 leaves: {:?}", trie.allocator.get_leaf_arena(0x01020304).map(|a| a.len()));
+        eprintln!(
+            "Root arena nodes: {:?}",
+            trie.allocator.get_node_arena(0).map(|a| a.len())
+        );
+        eprintln!(
+            "Root arena leaves: {:?}",
+            trie.allocator.get_leaf_arena(0).map(|a| a.len())
+        );
+        eprintln!(
+            "Child arena 0x01020304 nodes: {:?}",
+            trie.allocator.get_node_arena(0x01020304).map(|a| a.len())
+        );
+        eprintln!(
+            "Child arena 0x01020304 leaves: {:?}",
+            trie.allocator.get_leaf_arena(0x01020304).map(|a| a.len())
+        );
 
         // Debug: check child_arena_idx in root arena nodes
         if let Some(root_arena) = trie.allocator.get_node_arena(0) {
@@ -2238,7 +2381,10 @@ mod tests {
         );
 
         let leaf_arena = trie.allocator.get_leaf_arena(child_arena_idx).unwrap();
-        assert!(leaf_arena.len() >= 1, "Should have at least one leaf in L2 child arena");
+        assert!(
+            leaf_arena.len() >= 1,
+            "Should have at least one leaf in L2 child arena"
+        );
     }
 
     #[test]
