@@ -76,12 +76,13 @@ impl<K: TrieKey> Trie<K> {
     ///
     /// Initializes the trie in single-tenant mode where the client owns
     /// the entire key space. Creates one segment covering the full key range.
+    /// Root node is initialized with child arenas for storing nodes and leaves.
     ///
     /// # Performance
-    /// O(1) - creates empty allocator and reserves one segment
+    /// O(1) - creates empty segment manager and initializes root node with arenas
     ///
     /// # Memory Usage
-    /// ~300 bytes initial overhead (allocator + segment metadata + cache)
+    /// ~300 bytes initial overhead (segment manager + root node + arenas)
     ///
     /// # Example
     /// ```rust
@@ -91,7 +92,7 @@ impl<K: TrieKey> Trie<K> {
     /// // Trie is ready for insert/contains/remove operations
     /// ```
     pub fn new() -> Self {
-        let mut allocator = ArenaAllocator::new();
+        let mut segment_manager = SegmentManager::new();
 
         // Create root segment covering entire key space for single-tenant mode
         let key_range = KeyRange {
@@ -99,11 +100,16 @@ impl<K: TrieKey> Trie<K> {
             size: K::max_value(), // Cover full key range
         };
 
-        let root_segment = allocator.create_segment(key_range, 0);
+        let root_segment = segment_manager.create_segment(key_range, 0);
+
+        // Create root node with child arenas for storing all nodes/leaves
+        let mut root_node = Node::new();
+        root_node.child_arenas = Some(Box::new(ChildArenas::new()));
 
         Self {
-            allocator,
+            segment_manager,
             root_segment,
+            root_node,
             len: 0,
             min_key: None,
             max_key: None,
