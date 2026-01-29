@@ -1,7 +1,9 @@
 //! Main Trie structure for ordered integer sets.
 
-use crate::arena::{ArenaAllocator, KeyRange, SegmentId};
+use crate::arena::{SegmentManager, KeyRange, SegmentId};
 use crate::key::TrieKey;
+use crate::trie::{ChildArenas, Node};
+use alloc::boxed::Box;
 
 /// Ordered integer set with sublogarithmic complexity.
 ///
@@ -18,7 +20,9 @@ use crate::key::TrieKey;
 ///
 /// # Architecture
 /// - 256-way branching trie (8 bits per level)
-/// - Arena allocation for cache locality
+/// - Hierarchical arena allocation: arenas stored in nodes
+/// - Root arenas: stored in root_node.child_arenas
+/// - Child arenas: stored in nodes at split levels
 /// - Lazy allocation: nodes/leaves created on-demand
 /// - Single-tenant mode: client owns entire key space
 ///
@@ -37,11 +41,16 @@ use crate::key::TrieKey;
 /// ```
 #[derive(Debug)]
 pub struct Trie<K: TrieKey> {
-    /// Arena allocator for memory management
-    allocator: ArenaAllocator,
+    /// Segment manager for multi-tenant memory management
+    segment_manager: SegmentManager,
 
     /// Root segment ID for single-tenant mode
     root_segment: SegmentId,
+
+    /// Root node containing root arenas for the entire trie.
+    /// The child_arenas field contains node_arena and leaf_arena
+    /// for all nodes/leaves at levels 0 to first split level.
+    root_node: Node,
 
     /// Number of keys stored in the trie
     len: usize,
