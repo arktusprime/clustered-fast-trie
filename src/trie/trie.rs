@@ -1816,17 +1816,14 @@ impl<K: TrieKey> Trie<K> {
     ///
     /// # Performance
     /// O(log log U) - backtracks at most K::LEVELS levels, supports cross-arena navigation
-    fn find_prev_leaf(&self, path: &[(u32, u8, u64)], path_len: usize) -> u64 {
+    fn find_prev_leaf(&self, path: &[(u32, u8, u32)], path_len: usize) -> u64 {
         use crate::trie::EMPTY_LINK;
 
         // Backtrack through path to find predecessor branch
         for i in (0..path_len).rev() {
             let (node_idx, byte, arena_idx) = path[i];
 
-            let node_arena = match self.allocator.get_node_arena(arena_idx) {
-                Some(arena) => arena,
-                None => continue,
-            };
+            let node_arena = self.get_node_arena_new(arena_idx);
             let node = node_arena.get(node_idx);
 
             // Check if there's a predecessor child at this level
@@ -1837,8 +1834,8 @@ impl<K: TrieKey> Trie<K> {
                 // Check if next level is a split level - need to switch arena
                 let next_arena_idx = if K::SPLIT_LEVELS.contains(&(i + 1)) {
                     // Get child_arena_idx from the node we're descending into
-                    let child_arena_idx = node.child_arena_idx as u64;
-                    if !self.allocator.has_arena(child_arena_idx) {
+                    let child_arena_idx = node.child_arena_idx;
+                    if child_arena_idx as usize >= self.arenas.len() {
                         return EMPTY_LINK;
                     }
                     child_arena_idx
@@ -1869,17 +1866,14 @@ impl<K: TrieKey> Trie<K> {
     ///
     /// # Performance
     /// O(log log U) - backtracks at most K::LEVELS levels, supports cross-arena navigation
-    fn find_next_leaf(&self, path: &[(u32, u8, u64)], path_len: usize) -> u64 {
+    fn find_next_leaf(&self, path: &[(u32, u8, u32)], path_len: usize) -> u64 {
         use crate::trie::EMPTY_LINK;
 
         // Backtrack through path to find successor branch
         for i in (0..path_len).rev() {
             let (node_idx, byte, arena_idx) = path[i];
 
-            let node_arena = match self.allocator.get_node_arena(arena_idx) {
-                Some(arena) => arena,
-                None => continue,
-            };
+            let node_arena = self.get_node_arena_new(arena_idx);
             let node = node_arena.get(node_idx);
 
             // Check if there's a successor child at this level
@@ -1890,8 +1884,8 @@ impl<K: TrieKey> Trie<K> {
                 // Check if next level is a split level - need to switch arena
                 let next_arena_idx = if K::SPLIT_LEVELS.contains(&(i + 1)) {
                     // Get child_arena_idx from the node we're descending into
-                    let child_arena_idx = node.child_arena_idx as u64;
-                    if !self.allocator.has_arena(child_arena_idx) {
+                    let child_arena_idx = node.child_arena_idx;
+                    if child_arena_idx as usize >= self.arenas.len() {
                         return EMPTY_LINK;
                     }
                     child_arena_idx
@@ -1923,15 +1917,15 @@ impl<K: TrieKey> Trie<K> {
     ///
     /// # Performance
     /// O(K::LEVELS - start_level) = O(log log U), supports cross-arena navigation
-    fn find_min_leaf_from(&self, mut node_idx: u32, start_level: usize, mut arena_idx: u64) -> u64 {
+    fn find_min_leaf_from(&self, mut node_idx: u32, start_level: usize, mut arena_idx: u32) -> u64 {
         use crate::trie::{pack_link, EMPTY_LINK};
 
         // Traverse internal levels from start_level to K::LEVELS-1
         for level in start_level..(K::LEVELS - 1) {
-            let node_arena = match self.allocator.get_node_arena(arena_idx) {
-                Some(arena) => arena,
-                None => return EMPTY_LINK,
-            };
+            if arena_idx as usize >= self.arenas.len() {
+                return EMPTY_LINK;
+            }
+            let node_arena = self.get_node_arena_new(arena_idx);
 
             let node = node_arena.get(node_idx);
             let min_byte = match node.min_child() {
@@ -1942,8 +1936,8 @@ impl<K: TrieKey> Trie<K> {
 
             // Check if we need to switch arenas at split level
             if K::SPLIT_LEVELS.contains(&(level + 1)) {
-                let child_arena_idx = node.child_arena_idx as u64;
-                if !self.allocator.has_arena(child_arena_idx) {
+                let child_arena_idx = node.child_arena_idx;
+                if child_arena_idx as usize >= self.arenas.len() {
                     return EMPTY_LINK;
                 }
                 arena_idx = child_arena_idx;
@@ -1951,15 +1945,15 @@ impl<K: TrieKey> Trie<K> {
         }
 
         // Final level: get minimum leaf
-        let node_arena = match self.allocator.get_node_arena(arena_idx) {
-            Some(arena) => arena,
-            None => return EMPTY_LINK,
-        };
+        if arena_idx as usize >= self.arenas.len() {
+            return EMPTY_LINK;
+        }
+        let node_arena = self.get_node_arena_new(arena_idx);
         let final_node = node_arena.get(node_idx);
         match final_node.min_child() {
             Some(min_byte) => {
                 let leaf_idx = final_node.get_child(min_byte);
-                pack_link(arena_idx, leaf_idx)
+                pack_link(arena_idx as u64, leaf_idx)
             }
             None => EMPTY_LINK,
         }
@@ -1981,15 +1975,15 @@ impl<K: TrieKey> Trie<K> {
     ///
     /// # Performance
     /// O(K::LEVELS - start_level) = O(log log U), supports cross-arena navigation
-    fn find_max_leaf_from(&self, mut node_idx: u32, start_level: usize, mut arena_idx: u64) -> u64 {
+    fn find_max_leaf_from(&self, mut node_idx: u32, start_level: usize, mut arena_idx: u32) -> u64 {
         use crate::trie::{pack_link, EMPTY_LINK};
 
         // Traverse internal levels from start_level to K::LEVELS-1
         for level in start_level..(K::LEVELS - 1) {
-            let node_arena = match self.allocator.get_node_arena(arena_idx) {
-                Some(arena) => arena,
-                None => return EMPTY_LINK,
-            };
+            if arena_idx as usize >= self.arenas.len() {
+                return EMPTY_LINK;
+            }
+            let node_arena = self.get_node_arena_new(arena_idx);
 
             let node = node_arena.get(node_idx);
             let max_byte = match node.max_child() {
@@ -2000,8 +1994,8 @@ impl<K: TrieKey> Trie<K> {
 
             // Check if we need to switch arenas at split level
             if K::SPLIT_LEVELS.contains(&(level + 1)) {
-                let child_arena_idx = node.child_arena_idx as u64;
-                if !self.allocator.has_arena(child_arena_idx) {
+                let child_arena_idx = node.child_arena_idx;
+                if child_arena_idx as usize >= self.arenas.len() {
                     return EMPTY_LINK;
                 }
                 arena_idx = child_arena_idx;
@@ -2009,15 +2003,15 @@ impl<K: TrieKey> Trie<K> {
         }
 
         // Final level: get maximum leaf
-        let node_arena = match self.allocator.get_node_arena(arena_idx) {
-            Some(arena) => arena,
-            None => return EMPTY_LINK,
-        };
+        if arena_idx as usize >= self.arenas.len() {
+            return EMPTY_LINK;
+        }
+        let node_arena = self.get_node_arena_new(arena_idx);
         let final_node = node_arena.get(node_idx);
         match final_node.max_child() {
             Some(max_byte) => {
                 let leaf_idx = final_node.get_child(max_byte);
-                pack_link(arena_idx, leaf_idx)
+                pack_link(arena_idx as u64, leaf_idx)
             }
             None => EMPTY_LINK,
         }
@@ -2046,7 +2040,7 @@ impl<K: TrieKey> Trie<K> {
     ///
     /// # Performance
     /// O(K::LEVELS) worst case, but typically stops early at first non-empty node
-    fn cleanup_empty_nodes(&mut self, path: &[(u32, u8, u64)], path_len: usize) {
+    fn cleanup_empty_nodes(&mut self, path: &[(u32, u8, u32)], path_len: usize) {
         // Nothing to clean if path is empty
         if path_len == 0 {
             return;
@@ -2064,10 +2058,7 @@ impl<K: TrieKey> Trie<K> {
 
             // Check if node is empty
             let is_empty = {
-                let node_arena = self
-                    .allocator
-                    .get_node_arena(arena_idx)
-                    .expect("Node arena should be allocated");
+                let node_arena = self.get_node_arena_new(arena_idx);
                 let node = node_arena.get(node_idx);
                 node.is_empty()
             };
@@ -2084,16 +2075,13 @@ impl<K: TrieKey> Trie<K> {
                 let (parent_idx, _, parent_arena_idx) = path[i - 1];
 
                 // Remove link from parent
-                let node_arena = self
-                    .allocator
-                    .get_node_arena_mut(parent_arena_idx)
-                    .expect("Node arena should be allocated");
+                let node_arena = self.get_node_arena_mut_new(parent_arena_idx);
                 let parent = node_arena.get_mut(parent_idx);
                 parent.clear_child(byte);
             }
 
-            // Free the empty node
-            self.allocator.free_node(arena_idx, node_idx);
+            // Free the empty node - TODO: Implement free-list in Phase 5
+            // self.allocator.free_node(arena_idx, node_idx);
         }
     }
 }
