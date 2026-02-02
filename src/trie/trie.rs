@@ -1447,9 +1447,19 @@ impl<K: TrieKey> Trie<K> {
 
             if let Some(idx) = child_idx {
                 // Child exists - check if we need to switch arena BEFORE moving to child
-                // TODO Phase 3: Split levels support for u64/u128
                 if K::SPLIT_LEVELS.contains(&(level + 1)) {
-                    panic!("Split levels not yet supported in new architecture - implement in Phase 3");
+                    // Next level is a split level - switch to child arena
+                    let child_arena_idx = {
+                        let node_arena = self.get_node_arena_new(current_arena_idx);
+                        let current_node = node_arena.get(current_node_idx);
+                        current_node.child_arena_idx
+                    };
+                    
+                    // Child arena must exist (was created when child node was created)
+                    assert_ne!(child_arena_idx, 0, "Child arena should be set for existing child at split level");
+                    assert!((child_arena_idx as usize) < self.arenas.len(), "Child arena index out of bounds");
+                    
+                    current_arena_idx = child_arena_idx;
                 }
 
                 // Now move to child node
@@ -1457,20 +1467,33 @@ impl<K: TrieKey> Trie<K> {
             } else {
                 // Child doesn't exist - create new node and link it
                 
-                // TODO Phase 3: Split levels support for u64/u128
-                if K::SPLIT_LEVELS.contains(&(level + 1)) {
-                    panic!("Split levels not yet supported in new architecture - implement in Phase 3");
-                }
+                // Determine which arena the new node should be in
+                let target_arena_idx = if K::SPLIT_LEVELS.contains(&(level + 1)) {
+                    // Next level is a split level - create or get child arena
+                    let child_arena_idx = self.create_child_arena();
+                    
+                    // Store child_arena_idx in parent node
+                    {
+                        let node_arena = self.get_node_arena_mut_new(current_arena_idx);
+                        let current_node = node_arena.get_mut(current_node_idx);
+                        current_node.child_arena_idx = child_arena_idx;
+                    }
+                    
+                    child_arena_idx
+                } else {
+                    // Stay in current arena
+                    current_arena_idx
+                };
 
-                // Allocate new node in current arena
+                // Allocate new node in target arena
                 let new_node_idx = {
-                    let node_arena = self.get_node_arena_mut_new(current_arena_idx);
+                    let node_arena = self.get_node_arena_mut_new(target_arena_idx);
                     node_arena.alloc()
                 };
 
                 // Set parent_idx for the new node
                 {
-                    let node_arena = self.get_node_arena_mut_new(current_arena_idx);
+                    let node_arena = self.get_node_arena_mut_new(target_arena_idx);
                     let new_node = node_arena.get_mut(new_node_idx);
                     new_node.parent_idx = current_node_idx;
                 }
@@ -1482,8 +1505,9 @@ impl<K: TrieKey> Trie<K> {
                     current_node.set_child(byte, new_node_idx);
                 }
 
-                // Move to new node
+                // Move to new node and switch arena
                 current_node_idx = new_node_idx;
+                current_arena_idx = target_arena_idx;
             }
         }
 
@@ -2211,14 +2235,58 @@ mod tests {
         );
     }
 
-    // DISABLED: u64 requires split levels support (Phase 3)
-    // Will be re-enabled after implementing split levels in new architecture
-    // 
-    // #[test]
-    // fn test_multi_level_structure_u64() {
-    //     let mut trie = Trie::<u64>::new();
-    //     // TODO Phase 3: Implement split levels
-    // }
+    #[test]
+    fn test_multi_level_structure_u64() {
+        let mut trie = Trie::<u64>::new();
+
+        // For u64, we have 8 levels (0-7) with split at level 4
+        // Insert keys that differ at different levels but share same upper 4 bytes
+
+        let key1 = 0x0102030405060708u64;
+        let key2 = 0x0102030405060709u64; // Differs at last byte (level 7)
+        let key3 = 0x0102030405070708u64; // Differs at byte 6 (level 6)
+        let key4 = 0x0102030405080708u64; // Differs at byte 5 (level 5)
+
+        // Insert all keys
+        assert!(trie.insert(key1));
+        assert!(trie.insert(key2));
+        assert!(trie.insert(key3));
+        assert!(trie.insert(key4));
+
+        // Verify all keys exist
+        assert!(trie.contains(key1));
+        assert!(trie.contains(key2));
+        assert!(trie.contains(key3));
+        assert!(trie.contains(key4));
+
+        // NEW ARCHITECTURE: Check that child arena was created for split level 4
+        // All keys share same upper 4 bytes, so should have 1 root + 1 child arena
+        assert!(
+            trie.arenas.len() >= 2,
+            "Should have root arena + at least 1 child arena for u64 split level 4"
+        );
+
+        // Check root arena has nodes
+        let root_node_arena = &trie.arenas[0].node_arena;
+        assert!(
+            root_node_arena.len() >= 1,
+            "Root arena should have at least root node"
+        );
+
+        // Check child arena (index 1) has nodes and leaves
+        let child_node_arena = &trie.arenas[1].node_arena;
+        let child_leaf_arena = &trie.arenas[1].leaf_arena;
+        
+        assert!(
+            child_node_arena.len() >= 1,
+            "Child arena should have nodes for lower 4 bytes"
+        );
+        
+        assert!(
+            child_leaf_arena.len() >= 2,
+            "Child arena should have multiple leaves for different prefixes"
+        );
+    }
 
     #[test]
     fn test_different_prefixes() {
@@ -2293,55 +2361,50 @@ mod tests {
         assert!(!is_set(&leaf.bitmap, 3));
     }
 
-    // DISABLED: This test causes memory allocation failure due to sparse vector
-    // resize with huge arena_idx values. Will be re-enabled after migration to
-    // arena-in-nodes architecture (Phase 4 of MIGRATION_PLAN.md).
-    //
-    // Issue: u128 keys with large values create huge child_arena_idx, causing
-    // ArenaAllocator.sparse.resize() to attempt allocating ~2.9 EB of memory.
-    //
-    // #[test]
-    // fn test_u128_multi_level() {
-    //     let mut trie = Trie::<u128>::new();
-    //
-    //     // For u128, we have 16 levels (0-15) with splits at levels 4 and 12
-    //     // Insert keys that differ at various levels
-    //
-    //     let key1 = 0x0102030405060708090A0B0C0D0E0F10u128;
-    //     let key2 = 0x0102030405060708090A0B0C0D0E0F11u128; // Differs at last byte
-    //     let key3 = 0x0102030405060708090A0B0C0D0E1011u128; // Differs at byte 14
-    //
-    //     assert!(trie.insert(key1));
-    //     assert!(trie.insert(key2));
-    //     assert!(trie.insert(key3));
-    //
-    //     // Verify all keys exist
-    //     assert!(trie.contains(key1));
-    //     assert!(trie.contains(key2));
-    //     assert!(trie.contains(key3));
-    //
-    //     // For u128 with splits at levels 4 and 12, these keys create L2 child arena
-    //     // Keys differ at bytes 14-15, so they're at levels 12-15
-    //     // L2 child arena index = bytes 0-11 = 0x0102030405060708090A0B0C
-    //     let child_arena_idx = (0x0102030405060708u64 << 32) | 0x090A0B0Cu64;
-    //
-    //     // Check that child arena exists and has structures
-    //     let node_arena = trie.allocator.get_node_arena(child_arena_idx).unwrap();
-    //     assert!(
-    //         node_arena.len() > 1,
-    //         "Should have multiple nodes in L2 child arena for u128 keys"
-    //     );
-    //
-    //     let leaf_arena = trie.allocator.get_leaf_arena(child_arena_idx).unwrap();
-    //     assert!(
-    //         leaf_arena.len() >= 1,
-    //         "Should have at least one leaf in L2 child arena"
-    //     );
-    // }
+    #[test]
+    fn test_u128_multi_level() {
+        let mut trie = Trie::<u128>::new();
+
+        // For u128, we have 16 levels (0-15) with splits at levels 4 and 12
+        // Insert keys that differ at various levels
+
+        let key1 = 0x0102030405060708090A0B0C0D0E0F10u128;
+        let key2 = 0x0102030405060708090A0B0C0D0E0F11u128; // Differs at last byte
+        let key3 = 0x0102030405060708090A0B0C0D0E1011u128; // Differs at byte 14
+
+        assert!(trie.insert(key1));
+        assert!(trie.insert(key2));
+        assert!(trie.insert(key3));
+
+        // Verify all keys exist
+        assert!(trie.contains(key1));
+        assert!(trie.contains(key2));
+        assert!(trie.contains(key3));
+
+        // NEW ARCHITECTURE: Check that arenas were created for split levels 4 and 12
+        // Should have: 1 root + 1 L1 child (split 4) + 1 L2 child (split 12) = 3 arenas minimum
+        assert!(
+            trie.arenas.len() >= 3,
+            "Should have root + L1 child (split 4) + L2 child (split 12) arenas"
+        );
+
+        // Check root arena has nodes
+        assert!(
+            trie.arenas[0].node_arena.len() >= 1,
+            "Root arena should have at least root node"
+        );
+
+        // Check that we have child arenas with content
+        let has_child_with_nodes = trie.arenas.iter().skip(1).any(|arena| arena.node_arena.len() > 0);
+        assert!(has_child_with_nodes, "At least one child arena should have nodes");
+
+        let has_child_with_leaves = trie.arenas.iter().skip(1).any(|arena| arena.leaf_arena.len() > 0);
+        assert!(has_child_with_leaves, "At least one child arena should have leaves");
+    }
 
     #[test]
     fn test_cache_updates_on_insert() {
-        let mut trie = Trie::<u32>::new();
+        let mut trie = Trie::<u64>::new();
 
         // Initially empty
         assert_eq!(trie.len(), 0);
