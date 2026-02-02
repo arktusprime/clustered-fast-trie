@@ -310,27 +310,20 @@ impl<K: TrieKey> Trie<K> {
     /// assert!(!trie.remove(42));  // Key no longer exists
     /// ```
     pub fn remove(&mut self, key: K) -> bool {
-        // Step 1: Get root arena
-        let segment_meta = match self.allocator.get_segment_meta(self.root_segment) {
-            Some(meta) => meta,
-            None => return false, // Segment doesn't exist
-        };
-        let mut current_arena_idx = segment_meta.cache_key;
+        // NEW ARCHITECTURE: Use Vec<ChildArenas>
+        // Step 1: Start at root arena
+        let mut current_arena_idx = self.root_arena_idx;
 
-        // Step 2: Check if node arena exists and has root node
-        let node_arena = match self.allocator.get_node_arena(current_arena_idx) {
-            Some(arena) => arena,
-            None => return false, // Node arena not allocated
-        };
-
+        // Step 2: Check if root arena has nodes
+        let node_arena = self.get_node_arena_new(current_arena_idx);
         if node_arena.is_empty() {
             return false; // No root node exists
         }
 
         // Step 3: Traverse trie levels to find leaf, tracking path and arena switches
-        let mut path: [(u32, u8, u64); 16] = [(0, 0, 0); 16]; // Max 16 levels for u128: (node_idx, byte, arena_idx)
+        let mut path: [(u32, u8, u32); 16] = [(0, 0, 0); 16]; // Max 16 levels for u128: (node_idx, byte, arena_idx as u32)
         let mut path_len = 0;
-        let mut current_node_idx = 0; // Start at root
+        let mut current_node_idx = self.root_node_idx;
 
         // Traverse internal levels (0..K::LEVELS-1)
         for level in 0..(K::LEVELS - 1) {
@@ -339,10 +332,7 @@ impl<K: TrieKey> Trie<K> {
             path_len += 1;
 
             // Get current node arena (may have changed at split level)
-            let node_arena = match self.allocator.get_node_arena(current_arena_idx) {
-                Some(arena) => arena,
-                None => return false,
-            };
+            let node_arena = self.get_node_arena_new(current_arena_idx);
             let current_node = node_arena.get(current_node_idx);
 
             if !current_node.has_child(byte) {
@@ -354,10 +344,10 @@ impl<K: TrieKey> Trie<K> {
             // Check if we need to switch arenas at split level
             if K::SPLIT_LEVELS.contains(&(level + 1)) {
                 // Next level is a split level - get child arena index from current node
-                let child_arena_idx = current_node.child_arena_idx as u64;
+                let child_arena_idx = current_node.child_arena_idx;
 
                 // Check if child arena exists
-                if !self.allocator.has_arena(child_arena_idx) {
+                if child_arena_idx as usize >= self.arenas.len() {
                     return false; // Child arena not allocated
                 }
 
@@ -370,10 +360,7 @@ impl<K: TrieKey> Trie<K> {
         path[path_len] = (current_node_idx, last_node_byte, current_arena_idx);
         path_len += 1;
 
-        let node_arena = match self.allocator.get_node_arena(current_arena_idx) {
-            Some(arena) => arena,
-            None => return false,
-        };
+        let node_arena = self.get_node_arena_new(current_arena_idx);
         let final_node = node_arena.get(current_node_idx);
 
         if !final_node.has_child(last_node_byte) {
@@ -382,51 +369,51 @@ impl<K: TrieKey> Trie<K> {
 
         let leaf_idx = final_node.get_child(last_node_byte);
 
-        // Step 4: Check if leaf arena exists
-        let leaf_arena = match self.allocator.get_leaf_arena_mut(current_arena_idx) {
-            Some(arena) => arena,
-            None => return false, // Leaf arena not allocated
+        // Step 4: Clear bit in leaf bitmap (inline)
+        use crate::bitmap::{clear_bit, is_set};
+        let was_removed = {
+            let leaf_arena = self.get_leaf_arena_mut_new(current_arena_idx);
+            let leaf = leaf_arena.get_mut(leaf_idx);
+            let bit_idx = key.last_byte();
+            let was_set = is_set(&leaf.bitmap, bit_idx);
+            if was_set {
+                clear_bit(&leaf.bitmap, bit_idx);
+            }
+            was_set
         };
-
-        // Step 5: Clear bit in leaf bitmap
-        let was_removed = self.clear_bit_in_leaf(key, leaf_idx, current_arena_idx);
 
         if !was_removed {
             return false;
         }
 
-        // Step 6: Check if leaf is empty and cleanup if needed
+        // Step 5: Check if leaf is empty and cleanup if needed
         let is_leaf_empty = {
-            let leaf_arena = self
-                .allocator
-                .get_leaf_arena(current_arena_idx)
-                .expect("Leaf arena should be allocated");
+            let leaf_arena = self.get_leaf_arena_new(current_arena_idx);
             let leaf = leaf_arena.get(leaf_idx);
             crate::bitmap::is_empty(&leaf.bitmap)
         };
 
         if is_leaf_empty {
             // Unlink leaf from linked list
-            self.unlink_leaf(leaf_idx, current_arena_idx);
+            // TODO: Update unlink_leaf to use new architecture
+            self.unlink_leaf(leaf_idx, current_arena_idx as u64);
 
             // Remove link from parent node
             {
-                let node_arena = self
-                    .allocator
-                    .get_node_arena_mut(current_arena_idx)
-                    .expect("Node arena should be allocated");
+                let node_arena = self.get_node_arena_mut_new(current_arena_idx);
                 let parent_node = node_arena.get_mut(current_node_idx);
                 parent_node.clear_child(last_node_byte);
             }
 
-            // Free the leaf
-            self.allocator.free_leaf(current_arena_idx, leaf_idx);
+            // Free the leaf - TODO: Implement free-list in Phase 5
+            // self.allocator.free_leaf(current_arena_idx, leaf_idx);
 
             // Cleanup empty nodes up the path
+            // TODO: Update cleanup_empty_nodes to use new architecture
             self.cleanup_empty_nodes(&path, path_len - 1);
         }
 
-        // Step 7: Update cache
+        // Step 6: Update cache
         self.len -= 1;
         self.update_min_max_remove(key);
 
