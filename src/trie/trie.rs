@@ -170,18 +170,20 @@ impl<K: TrieKey> Trie<K> {
     /// assert!(!trie.insert(42));  // Already exists
     /// ```
     pub fn insert(&mut self, key: K) -> bool {
-        // Step 1: Root arenas are already initialized in new()
-        // Arena index 0 always refers to root arenas in root_node.child_arenas
-        let arena_idx = 0u64;
+        // NEW ARCHITECTURE: Use Vec<ChildArenas>
+        // Step 1: Root arena is always at index 0
+        let arena_idx = self.root_arena_idx;
 
-        // Step 2: Ensure root node exists (index 0 in node arena)
-        let root_node_idx = self.ensure_root_node();
+        // Step 2: Root node is always at index 0 in root arena
+        let root_node_idx = self.root_node_idx;
 
         // Step 3: Traverse trie levels to find/create path to leaf
+        // TODO: Update traverse_to_leaf to use new architecture
         let (leaf_idx, _path, _path_len, arena_idx) =
-            self.traverse_to_leaf(key, root_node_idx, arena_idx);
+            self.traverse_to_leaf(key, root_node_idx, arena_idx as u64);
 
         // Step 4: Set bit in leaf bitmap
+        // TODO: Update set_bit_in_leaf to use new architecture
         let was_new = self.set_bit_in_leaf(key, leaf_idx, arena_idx);
 
         // Step 5: Update cache if new insertion
@@ -218,35 +220,25 @@ impl<K: TrieKey> Trie<K> {
     /// assert!(trie.contains(42));   // Key exists
     /// ```
     pub fn contains(&self, key: K) -> bool {
-        // Step 1: Get root arena
-        let segment_meta = match self.segment_manager.get_segment_meta(self.root_segment) {
-            Some(meta) => meta,
-            None => return false, // Segment doesn't exist
-        };
-        let mut current_arena_idx = segment_meta.cache_key;
+        // NEW ARCHITECTURE: Use Vec<ChildArenas> directly
+        // Step 1: Start at root arena (index 0)
+        let mut current_arena_idx = self.root_arena_idx;
 
-        // Step 2: Check if node arena exists and has root node
-        let node_arena = match self.get_node_arena(current_arena_idx) {
-            Some(arena) => arena,
-            None => return false, // Node arena not allocated
-        };
-
+        // Step 2: Check if root arena has nodes
+        let node_arena = self.get_node_arena_new(current_arena_idx);
         if node_arena.is_empty() {
             return false; // No root node exists
         }
 
         // Step 3: Traverse trie levels to find leaf, switching arenas at split levels
-        let mut current_node_idx = 0; // Start at root
+        let mut current_node_idx = self.root_node_idx;
 
         // Traverse internal levels (0..K::LEVELS-1)
         for level in 0..(K::LEVELS - 1) {
             let byte = key.byte_at(level);
 
             // Get current node arena (may have changed at split level)
-            let node_arena = match self.get_node_arena(current_arena_idx) {
-                Some(arena) => arena,
-                None => return false,
-            };
+            let node_arena = self.get_node_arena_new(current_arena_idx);
             let current_node = node_arena.get(current_node_idx);
 
             if !current_node.has_child(byte) {
@@ -256,10 +248,10 @@ impl<K: TrieKey> Trie<K> {
             // Check if we need to switch arenas at split level BEFORE moving to child
             if K::SPLIT_LEVELS.contains(&(level + 1)) {
                 // Next level is a split level - get child arena index from CURRENT node (parent)
-                let child_arena_idx = current_node.child_arena_idx as u64;
+                let child_arena_idx = current_node.child_arena_idx;
 
                 // Check if child arena exists
-                if !self.has_arena(child_arena_idx) {
+                if child_arena_idx as usize >= self.arenas.len() {
                     return false; // Child arena not allocated
                 }
 
@@ -272,10 +264,7 @@ impl<K: TrieKey> Trie<K> {
 
         // Final level: check if leaf exists
         let last_node_byte = key.byte_at(K::LEVELS - 1);
-        let node_arena = match self.get_node_arena(current_arena_idx) {
-            Some(arena) => arena,
-            None => return false,
-        };
+        let node_arena = self.get_node_arena_new(current_arena_idx);
         let final_node = node_arena.get(current_node_idx);
 
         if !final_node.has_child(last_node_byte) {
@@ -284,14 +273,15 @@ impl<K: TrieKey> Trie<K> {
 
         let leaf_idx = final_node.get_child(last_node_byte);
 
-        // Step 4: Check if leaf arena exists
-        let leaf_arena = match self.get_leaf_arena(current_arena_idx) {
-            Some(arena) => arena,
-            None => return false, // Leaf arena not allocated
-        };
-
+        // Step 4: Get leaf arena and check bit
+        let leaf_arena = self.get_leaf_arena_new(current_arena_idx);
+        
         // Step 5: Check bit in leaf bitmap
-        self.check_bit_in_leaf(key, leaf_idx, current_arena_idx)
+        // TODO: Update check_bit_in_leaf to use new architecture (for now inline it)
+        use crate::bitmap::is_set;
+        let leaf = leaf_arena.get(leaf_idx);
+        let bit_idx = key.last_byte();
+        is_set(&leaf.bitmap, bit_idx)
     }
 
     /// Remove a key from the trie.
