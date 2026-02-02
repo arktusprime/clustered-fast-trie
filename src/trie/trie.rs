@@ -557,20 +557,19 @@ impl<K: TrieKey> Trie<K> {
             }
         }
 
-        // Get root arena
-        let segment_meta = self.allocator.get_segment_meta(self.root_segment)?;
-        let mut current_arena_idx = segment_meta.cache_key;
+        // NEW ARCHITECTURE: Start at root arena
+        let mut current_arena_idx = self.root_arena_idx;
 
         // Get node arena
-        let node_arena = self.allocator.get_node_arena(current_arena_idx)?;
+        let node_arena = self.get_node_arena_new(current_arena_idx);
         if node_arena.is_empty() {
             return None;
         }
 
         // Traverse to leaf containing key's prefix (save path for backtracking)
-        let mut path: [(u32, u8, u64); 16] = [(0, 0, 0); 16];
+        let mut path: [(u32, u8, u32); 16] = [(0, 0, 0); 16];
         let mut path_len = 0;
-        let mut current_node_idx = 0; // Start at root
+        let mut current_node_idx = self.root_node_idx;
 
         // Traverse internal levels (0..K::LEVELS-1)
         for level in 0..(K::LEVELS - 1) {
@@ -579,7 +578,7 @@ impl<K: TrieKey> Trie<K> {
             path_len += 1;
 
             // Get current node arena (may have changed at split level)
-            let node_arena = self.allocator.get_node_arena(current_arena_idx)?;
+            let node_arena = self.get_node_arena_new(current_arena_idx);
             let current_node = node_arena.get(current_node_idx);
 
             if !current_node.has_child(byte) {
@@ -592,10 +591,10 @@ impl<K: TrieKey> Trie<K> {
             // Check if we need to switch arenas at split level
             if K::SPLIT_LEVELS.contains(&(level + 1)) {
                 // Next level is a split level - get child arena index from current node
-                let child_arena_idx = current_node.child_arena_idx as u64;
+                let child_arena_idx = current_node.child_arena_idx;
 
                 // Check if child arena exists
-                if !self.allocator.has_arena(child_arena_idx) {
+                if child_arena_idx as usize >= self.arenas.len() {
                     return None; // Child arena not allocated
                 }
 
@@ -608,7 +607,7 @@ impl<K: TrieKey> Trie<K> {
         path[path_len] = (current_node_idx, last_node_byte, current_arena_idx);
         path_len += 1;
 
-        let node_arena = self.allocator.get_node_arena(current_arena_idx)?;
+        let node_arena = self.get_node_arena_new(current_arena_idx);
         let final_node = node_arena.get(current_node_idx);
 
         if !final_node.has_child(last_node_byte) {
@@ -647,16 +646,16 @@ impl<K: TrieKey> Trie<K> {
     /// Iterators and range operations cache the last accessed leaf index
     /// and use this method for subsequent calls, achieving O(1) per element.
     pub fn successor_from_leaf(&self, key: K, leaf_idx: u32) -> Option<K> {
-        let segment_meta = self.allocator.get_segment_meta(self.root_segment)?;
-        let arena_idx = segment_meta.cache_key;
+        // NEW ARCHITECTURE: Use root arena
+        let arena_idx = self.root_arena_idx;
         self.successor_from_leaf_internal(key, leaf_idx, arena_idx)
     }
 
     /// Internal helper for successor from leaf.
-    fn successor_from_leaf_internal(&self, key: K, leaf_idx: u32, arena_idx: u64) -> Option<K> {
+    fn successor_from_leaf_internal(&self, key: K, leaf_idx: u32, arena_idx: u32) -> Option<K> {
         use crate::trie::{unpack_link, EMPTY_LINK};
 
-        let leaf_arena = self.allocator.get_leaf_arena(arena_idx)?;
+        let leaf_arena = self.get_leaf_arena_new(arena_idx);
         let leaf = leaf_arena.get(leaf_idx);
 
         // Try to find successor in current leaf
@@ -671,7 +670,11 @@ impl<K: TrieKey> Trie<K> {
         // Not in current leaf - try next leaf via linked list
         if leaf.next != EMPTY_LINK {
             let (next_arena_idx, next_leaf_idx) = unpack_link(leaf.next);
-            let next_leaf_arena = self.allocator.get_leaf_arena(next_arena_idx)?;
+            // Check if arena exists
+            if next_arena_idx >= self.arenas.len() as u64 {
+                return None;
+            }
+            let next_leaf_arena = self.get_leaf_arena_new(next_arena_idx as u32);
             let next_leaf = next_leaf_arena.get(next_leaf_idx);
             if let Some(min_bit) = crate::bitmap::min_bit(&next_leaf.bitmap) {
                 // Found in next leaf - O(1) for adjacent leaves!
@@ -689,9 +692,9 @@ impl<K: TrieKey> Trie<K> {
     fn successor_backtrack(
         &self,
         key: K,
-        path: &[(u32, u8, u64)],
+        path: &[(u32, u8, u32)],
         path_len: usize,
-        arena_idx: u64,
+        arena_idx: u32,
     ) -> Option<K> {
         use crate::trie::{unpack_link, EMPTY_LINK};
 
@@ -704,7 +707,11 @@ impl<K: TrieKey> Trie<K> {
 
         // Get minimum key from next leaf
         let (next_arena_idx, next_leaf_idx) = unpack_link(next_link);
-        let leaf_arena = self.allocator.get_leaf_arena(next_arena_idx)?;
+        // Check if arena exists
+        if next_arena_idx >= self.arenas.len() as u64 {
+            return None;
+        }
+        let leaf_arena = self.get_leaf_arena_new(next_arena_idx as u32);
         let next_leaf = leaf_arena.get(next_leaf_idx);
 
         if let Some(min_bit) = crate::bitmap::min_bit(&next_leaf.bitmap) {
@@ -767,20 +774,19 @@ impl<K: TrieKey> Trie<K> {
             }
         }
 
-        // Get root arena
-        let segment_meta = self.allocator.get_segment_meta(self.root_segment)?;
-        let mut current_arena_idx = segment_meta.cache_key;
+        // NEW ARCHITECTURE: Start at root arena
+        let mut current_arena_idx = self.root_arena_idx;
 
         // Get node arena
-        let node_arena = self.allocator.get_node_arena(current_arena_idx)?;
+        let node_arena = self.get_node_arena_new(current_arena_idx);
         if node_arena.is_empty() {
             return None;
         }
 
         // Traverse to leaf containing key's prefix (save path for backtracking)
-        let mut path: [(u32, u8, u64); 16] = [(0, 0, 0); 16];
+        let mut path: [(u32, u8, u32); 16] = [(0, 0, 0); 16];
         let mut path_len = 0;
-        let mut current_node_idx = 0; // Start at root
+        let mut current_node_idx = self.root_node_idx;
 
         // Traverse internal levels (0..K::LEVELS-1)
         for level in 0..(K::LEVELS - 1) {
@@ -789,7 +795,7 @@ impl<K: TrieKey> Trie<K> {
             path_len += 1;
 
             // Get current node arena (may have changed at split level)
-            let node_arena = self.allocator.get_node_arena(current_arena_idx)?;
+            let node_arena = self.get_node_arena_new(current_arena_idx);
             let current_node = node_arena.get(current_node_idx);
 
             if !current_node.has_child(byte) {
@@ -802,10 +808,10 @@ impl<K: TrieKey> Trie<K> {
             // Check if we need to switch arenas at split level
             if K::SPLIT_LEVELS.contains(&(level + 1)) {
                 // Next level is a split level - get child arena index from current node
-                let child_arena_idx = current_node.child_arena_idx as u64;
+                let child_arena_idx = current_node.child_arena_idx;
 
                 // Check if child arena exists
-                if !self.allocator.has_arena(child_arena_idx) {
+                if child_arena_idx as usize >= self.arenas.len() {
                     return None; // Child arena not allocated
                 }
 
@@ -818,7 +824,7 @@ impl<K: TrieKey> Trie<K> {
         path[path_len] = (current_node_idx, last_node_byte, current_arena_idx);
         path_len += 1;
 
-        let node_arena = self.allocator.get_node_arena(current_arena_idx)?;
+        let node_arena = self.get_node_arena_new(current_arena_idx);
         let final_node = node_arena.get(current_node_idx);
 
         if !final_node.has_child(last_node_byte) {
@@ -857,16 +863,16 @@ impl<K: TrieKey> Trie<K> {
     /// Reverse iterators and range operations cache the last accessed leaf index
     /// and use this method for subsequent calls, achieving O(1) per element.
     pub fn predecessor_from_leaf(&self, key: K, leaf_idx: u32) -> Option<K> {
-        let segment_meta = self.allocator.get_segment_meta(self.root_segment)?;
-        let arena_idx = segment_meta.cache_key;
+        // NEW ARCHITECTURE: Use root arena
+        let arena_idx = self.root_arena_idx;
         self.predecessor_from_leaf_internal(key, leaf_idx, arena_idx)
     }
 
     /// Internal helper for predecessor from leaf.
-    fn predecessor_from_leaf_internal(&self, key: K, leaf_idx: u32, arena_idx: u64) -> Option<K> {
+    fn predecessor_from_leaf_internal(&self, key: K, leaf_idx: u32, arena_idx: u32) -> Option<K> {
         use crate::trie::{unpack_link, EMPTY_LINK};
 
-        let leaf_arena = self.allocator.get_leaf_arena(arena_idx)?;
+        let leaf_arena = self.get_leaf_arena_new(arena_idx);
         let leaf = leaf_arena.get(leaf_idx);
 
         // Try to find predecessor in current leaf
@@ -881,7 +887,11 @@ impl<K: TrieKey> Trie<K> {
         // Not in current leaf - try prev leaf via linked list
         if leaf.prev != EMPTY_LINK {
             let (prev_arena_idx, prev_leaf_idx) = unpack_link(leaf.prev);
-            let prev_leaf_arena = self.allocator.get_leaf_arena(prev_arena_idx)?;
+            // Check if arena exists
+            if prev_arena_idx >= self.arenas.len() as u64 {
+                return None;
+            }
+            let prev_leaf_arena = self.get_leaf_arena_new(prev_arena_idx as u32);
             let prev_leaf = prev_leaf_arena.get(prev_leaf_idx);
             if let Some(max_bit) = crate::bitmap::max_bit(&prev_leaf.bitmap) {
                 // Found in prev leaf - O(1) for adjacent leaves!
@@ -899,9 +909,9 @@ impl<K: TrieKey> Trie<K> {
     fn predecessor_backtrack(
         &self,
         key: K,
-        path: &[(u32, u8, u64)],
+        path: &[(u32, u8, u32)],
         path_len: usize,
-        arena_idx: u64,
+        arena_idx: u32,
     ) -> Option<K> {
         use crate::trie::{unpack_link, EMPTY_LINK};
 
@@ -914,7 +924,11 @@ impl<K: TrieKey> Trie<K> {
 
         // Get maximum key from prev leaf
         let (prev_arena_idx, prev_leaf_idx) = unpack_link(prev_link);
-        let leaf_arena = self.allocator.get_leaf_arena(prev_arena_idx)?;
+        // Check if arena exists
+        if prev_arena_idx >= self.arenas.len() as u64 {
+            return None;
+        }
+        let leaf_arena = self.get_leaf_arena_new(prev_arena_idx as u32);
         let prev_leaf = leaf_arena.get(prev_leaf_idx);
 
         if let Some(max_bit) = crate::bitmap::max_bit(&prev_leaf.bitmap) {
@@ -981,24 +995,23 @@ impl<K: TrieKey> Trie<K> {
     /// # Returns
     /// Minimum key in the trie, or None if empty
     fn find_min(&self) -> Option<K> {
-        // Get root arena
-        let segment_meta = self.allocator.get_segment_meta(self.root_segment)?;
-        let mut current_arena_idx = segment_meta.cache_key;
+        // NEW ARCHITECTURE: Start at root arena
+        let mut current_arena_idx = self.root_arena_idx;
 
         // Get node arena
-        let node_arena = self.allocator.get_node_arena(current_arena_idx)?;
+        let node_arena = self.get_node_arena_new(current_arena_idx);
         if node_arena.is_empty() {
             return None;
         }
 
         // Start building key from most significant byte
         let mut key_value: u128 = 0;
-        let mut current_node_idx = 0; // Start at root
+        let mut current_node_idx = self.root_node_idx;
 
         // Traverse internal levels (0..K::LEVELS-1)
         for level in 0..(K::LEVELS - 1) {
             // Get current node arena (may have changed at split level)
-            let node_arena = self.allocator.get_node_arena(current_arena_idx)?;
+            let node_arena = self.get_node_arena_new(current_arena_idx);
             let node = node_arena.get(current_node_idx);
             let min_byte = node.min_child()?;
 
@@ -1011,10 +1024,10 @@ impl<K: TrieKey> Trie<K> {
             // Check if we need to switch arenas at split level
             if K::SPLIT_LEVELS.contains(&(level + 1)) {
                 // Next level is a split level - get child arena index from current node
-                let child_arena_idx = node.child_arena_idx as u64;
+                let child_arena_idx = node.child_arena_idx;
 
                 // Check if child arena exists
-                if !self.allocator.has_arena(child_arena_idx) {
+                if child_arena_idx as usize >= self.arenas.len() {
                     return None; // Child arena not allocated
                 }
 
@@ -1023,7 +1036,7 @@ impl<K: TrieKey> Trie<K> {
         }
 
         // Final level: find minimum child (leaf)
-        let node_arena = self.allocator.get_node_arena(current_arena_idx)?;
+        let node_arena = self.get_node_arena_new(current_arena_idx);
         let final_node = node_arena.get(current_node_idx);
         let min_leaf_byte = final_node.min_child()?;
         key_value |= (min_leaf_byte as u128) << 8;
@@ -1031,7 +1044,7 @@ impl<K: TrieKey> Trie<K> {
         let leaf_idx = final_node.get_child(min_leaf_byte);
 
         // Get leaf arena and find minimum bit
-        let leaf_arena = self.allocator.get_leaf_arena(current_arena_idx)?;
+        let leaf_arena = self.get_leaf_arena_new(current_arena_idx);
         let leaf = leaf_arena.get(leaf_idx);
         let min_bit = crate::bitmap::min_bit(&leaf.bitmap)?;
 
@@ -1052,24 +1065,23 @@ impl<K: TrieKey> Trie<K> {
     /// # Returns
     /// Maximum key in the trie, or None if empty
     fn find_max(&self) -> Option<K> {
-        // Get root arena
-        let segment_meta = self.allocator.get_segment_meta(self.root_segment)?;
-        let mut current_arena_idx = segment_meta.cache_key;
+        // NEW ARCHITECTURE: Start at root arena
+        let mut current_arena_idx = self.root_arena_idx;
 
         // Get node arena
-        let node_arena = self.allocator.get_node_arena(current_arena_idx)?;
+        let node_arena = self.get_node_arena_new(current_arena_idx);
         if node_arena.is_empty() {
             return None;
         }
 
         // Start building key from most significant byte
         let mut key_value: u128 = 0;
-        let mut current_node_idx = 0; // Start at root
+        let mut current_node_idx = self.root_node_idx;
 
         // Traverse internal levels (0..K::LEVELS-1)
         for level in 0..(K::LEVELS - 1) {
             // Get current node arena (may have changed at split level)
-            let node_arena = self.allocator.get_node_arena(current_arena_idx)?;
+            let node_arena = self.get_node_arena_new(current_arena_idx);
             let node = node_arena.get(current_node_idx);
             let max_byte = node.max_child()?;
 
@@ -1082,10 +1094,10 @@ impl<K: TrieKey> Trie<K> {
             // Check if we need to switch arenas at split level
             if K::SPLIT_LEVELS.contains(&(level + 1)) {
                 // Next level is a split level - get child arena index from current node
-                let child_arena_idx = node.child_arena_idx as u64;
+                let child_arena_idx = node.child_arena_idx;
 
                 // Check if child arena exists
-                if !self.allocator.has_arena(child_arena_idx) {
+                if child_arena_idx as usize >= self.arenas.len() {
                     return None; // Child arena not allocated
                 }
 
@@ -1094,7 +1106,7 @@ impl<K: TrieKey> Trie<K> {
         }
 
         // Final level: find maximum child (leaf)
-        let node_arena = self.allocator.get_node_arena(current_arena_idx)?;
+        let node_arena = self.get_node_arena_new(current_arena_idx);
         let final_node = node_arena.get(current_node_idx);
         let max_leaf_byte = final_node.max_child()?;
         key_value |= (max_leaf_byte as u128) << 8;
@@ -1102,7 +1114,7 @@ impl<K: TrieKey> Trie<K> {
         let leaf_idx = final_node.get_child(max_leaf_byte);
 
         // Get leaf arena and find maximum bit
-        let leaf_arena = self.allocator.get_leaf_arena(current_arena_idx)?;
+        let leaf_arena = self.get_leaf_arena_new(current_arena_idx);
         let leaf = leaf_arena.get(leaf_idx);
         let max_bit = crate::bitmap::max_bit(&leaf.bitmap)?;
 
