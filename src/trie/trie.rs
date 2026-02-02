@@ -41,15 +41,30 @@ use alloc::boxed::Box;
 /// ```
 #[derive(Debug)]
 pub struct Trie<K: TrieKey> {
+    /// Flat vector of all arenas (root + child arenas).
+    ///
+    /// NEW ARCHITECTURE: Vec<ChildArenas> for O(1) arena access.
+    /// - Index 0: root arena (always present)
+    /// - Index 1+: child arenas (created on split levels)
+    ///
+    /// Physical index stored in Node.child_arena_idx for O(1) access.
+    arenas: alloc::vec::Vec<ChildArenas>,
+
     /// Segment manager for multi-tenant memory management
     segment_manager: SegmentManager,
 
     /// Root segment ID for single-tenant mode
     root_segment: SegmentId,
 
+    /// Physical index of root arena in arenas Vec (always 0).
+    root_arena_idx: u32,
+
+    /// Index of root node within root arena (always 0).
+    root_node_idx: u32,
+
     /// Root node containing root arenas for the entire trie.
-    /// The child_arenas field contains node_arena and leaf_arena
-    /// for all nodes/leaves at levels 0 to first split level.
+    /// DEPRECATED: Will be removed after migration.
+    /// Use arenas[root_arena_idx] instead.
     root_node: Node,
 
     /// Number of keys stored in the trie
@@ -102,13 +117,25 @@ impl<K: TrieKey> Trie<K> {
 
         let root_segment = segment_manager.create_segment(key_range, 0);
 
-        // Create root node with child arenas for storing all nodes/leaves
+        // NEW ARCHITECTURE: Create Vec<ChildArenas> with root arena
+        let mut arenas = alloc::vec::Vec::new();
+        arenas.push(ChildArenas::new());
+        let root_arena_idx = 0;
+
+        // Create root node at index 0 in root arena
+        let root_node_idx = arenas[0].node_arena.alloc();
+        debug_assert_eq!(root_node_idx, 0, "Root node must be at index 0");
+
+        // DEPRECATED: Keep root_node for compatibility during migration
         let mut root_node = Node::new();
         root_node.child_arenas = Some(Box::new(ChildArenas::new()));
 
         Self {
+            arenas,
             segment_manager,
             root_segment,
+            root_arena_idx,
+            root_node_idx,
             root_node,
             len: 0,
             min_key: None,
@@ -1249,7 +1276,103 @@ impl<K: TrieKey> Trie<K> {
     }
 
     // ============================================================================
-    // End of Arena Access Helper Methods
+    // End of Arena Access Helper Methods (OLD - for compatibility)
+    // ============================================================================
+
+    // ============================================================================
+    // NEW ARCHITECTURE: Arena Access Helper Methods for Vec<ChildArenas>
+    // ============================================================================
+    //
+    // These methods provide direct O(1) access to arenas via physical indices
+    // stored in Vec<ChildArenas>. No path traversal needed!
+
+    /// Get immutable reference to node arena by physical index (NEW ARCHITECTURE).
+    ///
+    /// # Arguments
+    /// * `arena_idx` - Physical index in arenas Vec (u32)
+    ///
+    /// # Returns
+    /// Reference to node arena
+    ///
+    /// # Panics
+    /// Panics if arena_idx is out of bounds
+    ///
+    /// # Performance
+    /// O(1) - direct Vec indexing
+    #[inline(always)]
+    fn get_node_arena_new(&self, arena_idx: u32) -> &crate::arena::Arena<crate::trie::Node> {
+        &self.arenas[arena_idx as usize].node_arena
+    }
+
+    /// Get mutable reference to node arena by physical index (NEW ARCHITECTURE).
+    ///
+    /// # Arguments
+    /// * `arena_idx` - Physical index in arenas Vec (u32)
+    ///
+    /// # Returns
+    /// Mutable reference to node arena
+    ///
+    /// # Panics
+    /// Panics if arena_idx is out of bounds
+    ///
+    /// # Performance
+    /// O(1) - direct Vec indexing
+    #[inline(always)]
+    fn get_node_arena_mut_new(&mut self, arena_idx: u32) -> &mut crate::arena::Arena<crate::trie::Node> {
+        &mut self.arenas[arena_idx as usize].node_arena
+    }
+
+    /// Get immutable reference to leaf arena by physical index (NEW ARCHITECTURE).
+    ///
+    /// # Arguments
+    /// * `arena_idx` - Physical index in arenas Vec (u32)
+    ///
+    /// # Returns
+    /// Reference to leaf arena
+    ///
+    /// # Panics
+    /// Panics if arena_idx is out of bounds
+    ///
+    /// # Performance
+    /// O(1) - direct Vec indexing
+    #[inline(always)]
+    fn get_leaf_arena_new(&self, arena_idx: u32) -> &crate::arena::Arena<crate::trie::Leaf> {
+        &self.arenas[arena_idx as usize].leaf_arena
+    }
+
+    /// Get mutable reference to leaf arena by physical index (NEW ARCHITECTURE).
+    ///
+    /// # Arguments
+    /// * `arena_idx` - Physical index in arenas Vec (u32)
+    ///
+    /// # Returns
+    /// Mutable reference to leaf arena
+    ///
+    /// # Panics
+    /// Panics if arena_idx is out of bounds
+    ///
+    /// # Performance
+    /// O(1) - direct Vec indexing
+    #[inline(always)]
+    fn get_leaf_arena_mut_new(&mut self, arena_idx: u32) -> &mut crate::arena::Arena<crate::trie::Leaf> {
+        &mut self.arenas[arena_idx as usize].leaf_arena
+    }
+
+    /// Create new child arena and return its physical index (NEW ARCHITECTURE).
+    ///
+    /// # Returns
+    /// Physical index of the newly created arena in arenas Vec
+    ///
+    /// # Performance
+    /// O(1) amortized - Vec::push()
+    #[inline]
+    fn create_child_arena(&mut self) -> u32 {
+        self.arenas.push(ChildArenas::new());
+        (self.arenas.len() - 1) as u32
+    }
+
+    // ============================================================================
+    // End of NEW ARCHITECTURE Arena Access Helper Methods
     // ============================================================================
 
     /// Ensure root node exists at index 0 in node arena.
