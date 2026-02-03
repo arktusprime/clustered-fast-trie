@@ -141,6 +141,7 @@ pub fn test_and_set_bit(bitmap: &[AtomicU64; 4], idx: u8) -> bool {
 /// }
 /// ```
 #[inline]
+#[allow(dead_code)]
 pub fn is_set_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4], idx: u8) -> bool {
     loop {
         let seq_before = seq.load(Ordering::Acquire);

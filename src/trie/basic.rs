@@ -50,7 +50,7 @@ impl Node {
     /// O(1) - bitmap update + array write
     #[inline(always)]
     pub fn set_child(&mut self, byte: u8, child_idx: u32) {
-        bitmap::set_bit(&mut self.bitmap, byte);
+        bitmap::set_bit(&self.bitmap, byte);
         self.children[byte as usize] = child_idx;
     }
 
@@ -65,7 +65,7 @@ impl Node {
     /// O(1) - bitmap update + array write
     #[inline]
     pub fn clear_child(&mut self, byte: u8) {
-        bitmap::clear_bit(&mut self.bitmap, byte);
+        bitmap::clear_bit(&self.bitmap, byte);
         self.children[byte as usize] = EMPTY;
     }
 }

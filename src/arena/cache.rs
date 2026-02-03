@@ -19,6 +19,7 @@
 /// - Stale cache entry = cache miss = safe fallback to cold path
 /// - Defragmentation updates arena indices automatically
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct SegmentCache {
     /// Last accessed leaf index (hot path optimization)
     last_leaf_idx: u32,
@@ -34,6 +35,7 @@ pub struct SegmentCache {
     path_bytes: [u8; 15], // Max for u128 (16 levels - 1)
 }
 
+#[allow(dead_code)]
 impl SegmentCache {
     /// Create a new empty segment cache.
     ///

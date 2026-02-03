@@ -6,6 +6,7 @@ use crate::key::TrieKey;
 ///
 /// This is the stable identifier given to clients.
 /// It never changes even during defragmentation.
+#[allow(dead_code)]
 pub type SegmentId = u32;
 
 /// Segment metadata structure.
@@ -38,6 +39,7 @@ pub type SegmentId = u32;
 /// - Child arenas: calculated via TrieKey::arena_idx_at_level() from normalized key
 /// - Shared structure: no duplication, efficient memory usage
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub struct SegmentMeta {
     /// Root arena index in sparse/dense mapping.
     ///
@@ -70,6 +72,7 @@ pub struct SegmentMeta {
 ///
 /// Defines the logical key range that a segment will handle.
 /// Uses u128 to support all key types.
+#[allow(dead_code)]
 pub struct KeyRange {
     /// Start of the key range (inclusive).
     pub start: u128,
@@ -77,6 +80,7 @@ pub struct KeyRange {
     pub size: u128,
 }
 
+#[allow(dead_code)]
 impl SegmentMeta {
     /// Create new segment metadata.
     ///

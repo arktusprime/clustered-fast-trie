@@ -1,7 +1,6 @@
 //! Leaf node structure for storing actual keys.
 
 use crate::atomic::{AtomicU64, Ordering};
-use crate::constants::EMPTY;
 
 /// Empty link sentinel for prev/next pointers (all bits set).
 pub const EMPTY_LINK: u64 = u64::MAX;
@@ -28,7 +27,7 @@ pub fn pack_link(arena_idx: u64, leaf_idx: u32) -> u64 {
 /// (arena_idx, leaf_idx) tuple
 #[inline(always)]
 pub fn unpack_link(packed: u64) -> (u64, u32) {
-    let arena_idx = (packed >> 32) as u64;
+    let arena_idx = packed >> 32;
     let leaf_idx = (packed & 0xFFFFFFFF) as u32;
     (arena_idx, leaf_idx)
 }

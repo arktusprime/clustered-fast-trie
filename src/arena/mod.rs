@@ -3,7 +3,7 @@
 //! This module provides the arena allocation system for clustered-fast-trie,
 //! supporting flexible key ranges, lazy allocation, and transparent defragmentation.
 
-pub mod allocator;
+#[allow(clippy::module_inception)]
 pub mod arena;
 pub mod cache;
 pub mod defrag;
@@ -14,9 +14,10 @@ pub mod segment;
 pub mod segment_manager;
 
 // Re-exports
-#[deprecated(note = "Use SegmentManager instead - arenas are now stored in nodes")]
-pub use allocator::ArenaAllocator;
 pub use arena::Arena;
+#[allow(unused_imports)]
 pub use cache::SegmentCache;
+#[allow(unused_imports)]
 pub use segment::{KeyRange, SegmentId, SegmentMeta};
+#[allow(unused_imports)]
 pub use segment_manager::SegmentManager;

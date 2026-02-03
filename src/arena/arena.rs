@@ -30,6 +30,7 @@ pub struct Arena<T> {
     elements: Vec<T>,
 }
 
+#[allow(dead_code)]
 impl<T> Arena<T> {
     /// Create a new empty arena.
     ///
@@ -171,11 +172,13 @@ impl<T> Default for Arena<T> {
 /// Type alias for Node arena.
 ///
 /// Used for storing internal trie nodes at all levels.
+#[allow(dead_code)]
 pub type NodeArena = Arena<Node>;
 
 /// Type alias for Leaf arena.
 ///
 /// Used for storing leaf nodes (256-bit bitmaps).
+#[allow(dead_code)]
 pub type LeafArena = Arena<Leaf>;
 
 #[cfg(test)]

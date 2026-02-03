@@ -15,6 +15,7 @@ use crate::atomic::{AtomicU64, Ordering};
 /// # Performance
 /// O(1) - processes up to 4 words with bitwise operations
 #[inline]
+#[allow(dead_code)]
 pub fn is_range_set(bitmap: &[AtomicU64; 4], from: u8, to: u16) -> bool {
     if from as u16 >= to {
         return true; // Empty range
@@ -48,6 +49,7 @@ pub fn is_range_set(bitmap: &[AtomicU64; 4], from: u8, to: u16) -> bool {
     }
 
     // Middle words: all bits
+    #[allow(clippy::needless_range_loop)]
     for w in (from_word + 1)..to_word {
         if bitmap[w].load(Ordering::Acquire) != !0u64 {
             return false;
@@ -56,6 +58,7 @@ pub fn is_range_set(bitmap: &[AtomicU64; 4], from: u8, to: u16) -> bool {
 
     // Last word: 0 to to_bit
     let to_bit = to % 64;
+    #[allow(clippy::collapsible_if)]
     if to_bit > 0 {
         let last_mask = (1u64 << to_bit) - 1;
         let last_value = bitmap[to_word].load(Ordering::Acquire);
@@ -83,6 +86,7 @@ pub fn is_range_set(bitmap: &[AtomicU64; 4], from: u8, to: u16) -> bool {
 /// # Performance
 /// O(n) where n = indices.len(), with stable performance regardless of index order
 #[inline]
+#[allow(dead_code)]
 pub fn are_bits_set(bitmap: &[AtomicU64; 4], indices: &[u8]) -> bool {
     if indices.is_empty() {
         return true; // Empty set
@@ -139,6 +143,7 @@ pub fn is_empty(bitmap: &[AtomicU64; 4]) -> bool {
 /// # Performance
 /// O(1) - uses AND reduction (SIMD-friendly, fewer branches)
 #[inline]
+#[allow(dead_code)]
 pub fn is_full(bitmap: &[AtomicU64; 4]) -> bool {
     let w0 = bitmap[0].load(Ordering::Acquire);
     let w1 = bitmap[1].load(Ordering::Acquire);
@@ -166,6 +171,7 @@ pub fn is_full(bitmap: &[AtomicU64; 4]) -> bool {
 /// # Thread Safety
 /// Lock-free read operation. Retries if concurrent bulk modification detected.
 #[inline]
+#[allow(dead_code)]
 pub fn is_range_set_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4], from: u8, to: u16) -> bool {
     loop {
         let seq_before = seq.load(Ordering::Acquire);
@@ -199,6 +205,7 @@ pub fn is_range_set_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4], from: u8, 
 /// # Thread Safety
 /// Lock-free read operation. Retries if concurrent bulk modification detected.
 #[inline]
+#[allow(dead_code)]
 pub fn are_bits_set_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4], indices: &[u8]) -> bool {
     loop {
         let seq_before = seq.load(Ordering::Acquire);
@@ -231,6 +238,7 @@ pub fn are_bits_set_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4], indices: &
 /// # Thread Safety
 /// Lock-free read operation. Retries if concurrent bulk modification detected.
 #[inline]
+#[allow(dead_code)]
 pub fn is_empty_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4]) -> bool {
     loop {
         let seq_before = seq.load(Ordering::Acquire);
@@ -263,6 +271,7 @@ pub fn is_empty_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4]) -> bool {
 /// # Thread Safety
 /// Lock-free read operation. Retries if concurrent bulk modification detected.
 #[inline]
+#[allow(dead_code)]
 pub fn is_full_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4]) -> bool {
     loop {
         let seq_before = seq.load(Ordering::Acquire);

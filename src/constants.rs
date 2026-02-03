@@ -1,4 +1,5 @@
 //! Core constants and type definitions for clustered-fast-trie.
+#![allow(dead_code)]
 
 /// Sentinel value for empty/null arena index.
 ///

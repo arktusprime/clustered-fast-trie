@@ -12,6 +12,7 @@ use crate::atomic::{AtomicU64, Ordering};
 /// # Performance
 /// O(1) - processes up to 4 words with bitwise operations
 #[inline]
+#[allow(dead_code)]
 pub fn set_range(bitmap: &[AtomicU64; 4], from: u8, to: u16) {
     if from as u16 >= to {
         return;
@@ -39,6 +40,7 @@ pub fn set_range(bitmap: &[AtomicU64; 4], from: u8, to: u16) {
         bitmap[from_word].fetch_or(!0u64 << from_bit, Ordering::Relaxed);
 
         // Middle words: all bits
+        #[allow(clippy::needless_range_loop)]
         for w in (from_word + 1)..to_word {
             bitmap[w].store(!0u64, Ordering::Relaxed);
         }
@@ -63,6 +65,7 @@ pub fn set_range(bitmap: &[AtomicU64; 4], from: u8, to: u16) {
 /// # Performance
 /// O(1) - processes up to 4 words with bitwise operations
 #[inline]
+#[allow(dead_code)]
 pub fn clear_range(bitmap: &[AtomicU64; 4], from: u8, to: u16) {
     if from as u16 >= to {
         return;
@@ -90,6 +93,7 @@ pub fn clear_range(bitmap: &[AtomicU64; 4], from: u8, to: u16) {
         bitmap[from_word].fetch_and(!(!0u64 << from_bit), Ordering::Relaxed);
 
         // Middle words: all bits
+        #[allow(clippy::needless_range_loop)]
         for w in (from_word + 1)..to_word {
             bitmap[w].store(0, Ordering::Relaxed);
         }
@@ -116,6 +120,7 @@ pub fn clear_range(bitmap: &[AtomicU64; 4], from: u8, to: u16) {
 /// # Performance
 /// O(n) where n = indices.len(), with stable performance regardless of index order
 #[inline]
+#[allow(dead_code)]
 pub fn set_bits(bitmap: &[AtomicU64; 4], indices: &[u8]) {
     if indices.is_empty() {
         return;
@@ -149,6 +154,7 @@ pub fn set_bits(bitmap: &[AtomicU64; 4], indices: &[u8]) {
 /// # Performance
 /// O(n) where n = indices.len(), with stable performance regardless of index order
 #[inline]
+#[allow(dead_code)]
 pub fn clear_bits(bitmap: &[AtomicU64; 4], indices: &[u8]) {
     if indices.is_empty() {
         return;
@@ -178,6 +184,7 @@ pub fn clear_bits(bitmap: &[AtomicU64; 4], indices: &[u8]) {
 /// # Performance
 /// O(1) - SIMD-friendly, 4 independent stores
 #[inline]
+#[allow(dead_code)]
 pub fn set_all(bitmap: &[AtomicU64; 4]) {
     bitmap[0].store(!0u64, Ordering::Relaxed);
     bitmap[1].store(!0u64, Ordering::Relaxed);
@@ -193,6 +200,7 @@ pub fn set_all(bitmap: &[AtomicU64; 4]) {
 /// # Performance
 /// O(1) - SIMD-friendly, 4 independent stores
 #[inline]
+#[allow(dead_code)]
 pub fn clear_all(bitmap: &[AtomicU64; 4]) {
     bitmap[0].store(0, Ordering::Relaxed);
     bitmap[1].store(0, Ordering::Relaxed);
@@ -222,6 +230,7 @@ pub fn clear_all(bitmap: &[AtomicU64; 4]) {
 ///
 /// Readers will retry if they observe odd seq or seq changed during read.
 #[inline]
+#[allow(dead_code)]
 pub fn set_range_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4], from: u8, to: u16) {
     seq.fetch_add(1, Ordering::Release); // Make odd
     #[cfg(not(feature = "single-threaded"))]
@@ -248,6 +257,7 @@ pub fn set_range_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4], from: u8, to:
 /// # Thread Safety
 /// Safe for concurrent writers. See `set_range_seqlock` for protocol details.
 #[inline]
+#[allow(dead_code)]
 pub fn clear_range_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4], from: u8, to: u16) {
     seq.fetch_add(1, Ordering::Release); // Make odd
     #[cfg(not(feature = "single-threaded"))]
@@ -273,6 +283,7 @@ pub fn clear_range_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4], from: u8, t
 /// # Thread Safety
 /// Safe for concurrent writers. See `set_range_seqlock` for protocol details.
 #[inline]
+#[allow(dead_code)]
 pub fn set_bits_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4], indices: &[u8]) {
     seq.fetch_add(1, Ordering::Release); // Make odd
     #[cfg(not(feature = "single-threaded"))]
@@ -298,6 +309,7 @@ pub fn set_bits_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4], indices: &[u8]
 /// # Thread Safety
 /// Safe for concurrent writers. See `set_range_seqlock` for protocol details.
 #[inline]
+#[allow(dead_code)]
 pub fn clear_bits_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4], indices: &[u8]) {
     seq.fetch_add(1, Ordering::Release); // Make odd
     #[cfg(not(feature = "single-threaded"))]

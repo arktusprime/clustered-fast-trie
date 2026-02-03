@@ -58,6 +58,7 @@ pub fn max_bit(bitmap: &[AtomicU64; 4]) -> Option<u8> {
 /// # Performance
 /// O(1) - uses CPU POPCNT instruction for fast counting
 #[inline]
+#[allow(dead_code)]
 pub fn count_bits(bitmap: &[AtomicU64; 4]) -> u32 {
     let w0 = bitmap[0].load(Ordering::Acquire);
     let w1 = bitmap[1].load(Ordering::Acquire);
@@ -99,6 +100,7 @@ pub fn next_set_bit(bitmap: &[AtomicU64; 4], after: u8) -> Option<u8> {
     }
 
     // Check subsequent words
+    #[allow(clippy::needless_range_loop)]
     for word_idx in (start_word + 1)..4 {
         let value = bitmap[word_idx].load(Ordering::Acquire);
         if value != 0 {
@@ -165,6 +167,7 @@ pub fn prev_set_bit(bitmap: &[AtomicU64; 4], before: u8) -> Option<u8> {
 /// # Performance
 /// O(1) - uses CPU POPCNT instruction for fast counting
 #[inline]
+#[allow(dead_code)]
 pub fn count_range(bitmap: &[AtomicU64; 4], from: u8, to: u16) -> u32 {
     if from as u16 >= to {
         return 0;
@@ -198,6 +201,7 @@ pub fn count_range(bitmap: &[AtomicU64; 4], from: u8, to: u16) -> u32 {
     count += popcount(first_value & first_mask);
 
     // Middle words: all bits
+    #[allow(clippy::needless_range_loop)]
     for w in (from_word + 1)..to_word {
         count += popcount(bitmap[w].load(Ordering::Acquire));
     }
@@ -232,6 +236,7 @@ pub fn count_range(bitmap: &[AtomicU64; 4], from: u8, to: u16) -> u32 {
 /// # Thread Safety
 /// Lock-free read operation. Retries if concurrent bulk modification detected.
 #[inline]
+#[allow(dead_code)]
 pub fn min_bit_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4]) -> Option<u8> {
     loop {
         let seq_before = seq.load(Ordering::Acquire);
@@ -264,6 +269,7 @@ pub fn min_bit_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4]) -> Option<u8> {
 /// # Thread Safety
 /// Lock-free read operation. Retries if concurrent bulk modification detected.
 #[inline]
+#[allow(dead_code)]
 pub fn max_bit_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4]) -> Option<u8> {
     loop {
         let seq_before = seq.load(Ordering::Acquire);
@@ -296,6 +302,7 @@ pub fn max_bit_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4]) -> Option<u8> {
 /// # Thread Safety
 /// Lock-free read operation. Retries if concurrent bulk modification detected.
 #[inline]
+#[allow(dead_code)]
 pub fn count_bits_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4]) -> u32 {
     loop {
         let seq_before = seq.load(Ordering::Acquire);
@@ -329,6 +336,7 @@ pub fn count_bits_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4]) -> u32 {
 /// # Thread Safety
 /// Lock-free read operation. Retries if concurrent bulk modification detected.
 #[inline]
+#[allow(dead_code)]
 pub fn next_set_bit_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4], after: u8) -> Option<u8> {
     loop {
         let seq_before = seq.load(Ordering::Acquire);
@@ -362,6 +370,7 @@ pub fn next_set_bit_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4], after: u8)
 /// # Thread Safety
 /// Lock-free read operation. Retries if concurrent bulk modification detected.
 #[inline]
+#[allow(dead_code)]
 pub fn prev_set_bit_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4], before: u8) -> Option<u8> {
     loop {
         let seq_before = seq.load(Ordering::Acquire);
@@ -396,6 +405,7 @@ pub fn prev_set_bit_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4], before: u8
 /// # Thread Safety
 /// Lock-free read operation. Retries if concurrent bulk modification detected.
 #[inline]
+#[allow(dead_code)]
 pub fn count_range_seqlock(seq: &AtomicU64, bitmap: &[AtomicU64; 4], from: u8, to: u16) -> u32 {
     loop {
         let seq_before = seq.load(Ordering::Acquire);

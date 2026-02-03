@@ -1,4 +1,5 @@
 //! CPU intrinsic operations for fast bit manipulation.
+#![allow(dead_code)]
 
 /// Count trailing zeros (find first set bit from right).
 ///

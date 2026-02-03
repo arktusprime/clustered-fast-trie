@@ -5,6 +5,7 @@ mod child_arenas;
 mod leaf;
 mod node;
 mod state;
+#[allow(clippy::module_inception)]
 mod trie;
 
 pub use child_arenas::ChildArenas;

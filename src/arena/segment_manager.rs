@@ -22,6 +22,7 @@ use alloc::vec::Vec;
 /// - O(1) cache access for hot path optimization
 /// - Minimal memory overhead (only metadata, no arenas)
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct SegmentManager {
     /// Segment metadata indexed by permanent key (perm_key).
     /// None = segment not created, Some = segment exists.
@@ -32,6 +33,7 @@ pub struct SegmentManager {
     segment_caches: Vec<Option<SegmentCache>>,
 }
 
+#[allow(dead_code)]
 impl SegmentManager {
     /// Create a new empty segment manager.
     ///

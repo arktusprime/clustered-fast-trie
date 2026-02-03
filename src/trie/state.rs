@@ -1,4 +1,5 @@
 //! Node state checking operations.
+#![allow(dead_code)]
 
 use crate::bitmap;
 use crate::trie::Node;

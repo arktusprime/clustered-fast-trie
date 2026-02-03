@@ -38,6 +38,7 @@ pub enum Ordering {
     SeqCst,
 }
 
+#[allow(dead_code)]
 impl AtomicU64 {
     /// Create a new atomic with initial value.
     ///

@@ -251,7 +251,7 @@ impl TrieKey for u64 {
     #[inline(always)]
     fn arena_idx(self) -> u64 {
         // u64: upper 4 bytes as arena index
-        (self >> 32) as u64
+        self >> 32
     }
 
     #[inline(always)]
