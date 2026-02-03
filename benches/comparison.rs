@@ -1,8 +1,343 @@
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use clustered_fast_trie::Trie;
+use std::collections::BTreeSet;
 
-fn benchmark_placeholder(_c: &mut Criterion) {
-    // Benchmarks will be added as implementation progresses
+/// Benchmark insert operation with sequential keys
+fn bench_insert_sequential(c: &mut Criterion) {
+    let mut group = c.benchmark_group("insert_sequential");
+    
+    for size in [1000, 10_000, 100_000].iter() {
+        group.bench_with_input(BenchmarkId::new("Trie", size), size, |b, &size| {
+            b.iter(|| {
+                let mut trie = Trie::<u64>::new();
+                for i in 0..size {
+                    black_box(trie.insert(i));
+                }
+            });
+        });
+        
+        group.bench_with_input(BenchmarkId::new("BTreeSet", size), size, |b, &size| {
+            b.iter(|| {
+                let mut btree = BTreeSet::new();
+                for i in 0..size {
+                    black_box(btree.insert(i));
+                }
+            });
+        });
+    }
+    
+    group.finish();
 }
 
-criterion_group!(benches, benchmark_placeholder);
+/// Benchmark insert operation with clustered keys
+fn bench_insert_clustered(c: &mut Criterion) {
+    let mut group = c.benchmark_group("insert_clustered");
+    
+    // Clustered data: multiple ranges with gaps
+    let clusters = vec![
+        (0, 1000),
+        (10_000, 11_000),
+        (20_000, 21_000),
+        (30_000, 31_000),
+    ];
+    
+    group.bench_function("Trie", |b| {
+        b.iter(|| {
+            let mut trie = Trie::<u64>::new();
+            for (start, end) in &clusters {
+                for i in *start..*end {
+                    black_box(trie.insert(i));
+                }
+            }
+        });
+    });
+    
+    group.bench_function("BTreeSet", |b| {
+        b.iter(|| {
+            let mut btree = BTreeSet::new();
+            for (start, end) in &clusters {
+                for i in *start..*end {
+                    black_box(btree.insert(i));
+                }
+            }
+        });
+    });
+    
+    group.finish();
+}
+
+/// Benchmark insert operation with random keys
+fn bench_insert_random(c: &mut Criterion) {
+    let mut group = c.benchmark_group("insert_random");
+    
+    // Pre-generate random keys to ensure fair comparison
+    let random_keys: Vec<u64> = (0..10_000)
+        .map(|i| {
+            // Simple LCG for reproducible "random" keys
+            let a = 1664525u64;
+            let c = 1013904223u64;
+            a.wrapping_mul(i).wrapping_add(c)
+        })
+        .collect();
+    
+    group.bench_function("Trie", |b| {
+        b.iter(|| {
+            let mut trie = Trie::<u64>::new();
+            for &key in &random_keys {
+                black_box(trie.insert(key));
+            }
+        });
+    });
+    
+    group.bench_function("BTreeSet", |b| {
+        b.iter(|| {
+            let mut btree = BTreeSet::new();
+            for &key in &random_keys {
+                black_box(btree.insert(key));
+            }
+        });
+    });
+    
+    group.finish();
+}
+
+/// Benchmark contains operation
+fn bench_contains(c: &mut Criterion) {
+    let mut group = c.benchmark_group("contains");
+    
+    // Setup: insert 10k sequential keys
+    let size = 10_000u64;
+    
+    let mut trie = Trie::<u64>::new();
+    let mut btree = BTreeSet::new();
+    for i in 0..size {
+        trie.insert(i);
+        btree.insert(i);
+    }
+    
+    // Benchmark lookups (mix of existing and non-existing keys)
+    group.bench_function("Trie_existing", |b| {
+        b.iter(|| {
+            for i in (0..size).step_by(10) {
+                black_box(trie.contains(i));
+            }
+        });
+    });
+    
+    group.bench_function("BTreeSet_existing", |b| {
+        b.iter(|| {
+            for i in (0..size).step_by(10) {
+                black_box(btree.contains(&i));
+            }
+        });
+    });
+    
+    group.bench_function("Trie_missing", |b| {
+        b.iter(|| {
+            for i in (size..size + 1000).step_by(10) {
+                black_box(trie.contains(i));
+            }
+        });
+    });
+    
+    group.bench_function("BTreeSet_missing", |b| {
+        b.iter(|| {
+            for i in (size..size + 1000).step_by(10) {
+                black_box(btree.contains(&i));
+            }
+        });
+    });
+    
+    group.finish();
+}
+
+/// Benchmark contains with clustered lookups
+fn bench_contains_clustered(c: &mut Criterion) {
+    let mut group = c.benchmark_group("contains_clustered");
+    
+    // Setup: insert clustered data
+    let mut trie = Trie::<u64>::new();
+    let mut btree = BTreeSet::new();
+    
+    for cluster_start in (0..100_000).step_by(10_000) {
+        for i in cluster_start..cluster_start + 1000 {
+            trie.insert(i);
+            btree.insert(i);
+        }
+    }
+    
+    // Benchmark lookups in the first cluster
+    group.bench_function("Trie", |b| {
+        b.iter(|| {
+            for i in 0..1000 {
+                black_box(trie.contains(i));
+            }
+        });
+    });
+    
+    group.bench_function("BTreeSet", |b| {
+        b.iter(|| {
+            for i in 0..1000 {
+                black_box(btree.contains(&i));
+            }
+        });
+    });
+    
+    group.finish();
+}
+
+/// Benchmark remove operation
+fn bench_remove(c: &mut Criterion) {
+    let mut group = c.benchmark_group("remove");
+    
+    let size = 10_000u64;
+    
+    // Benchmark removing sequential keys
+    group.bench_function("Trie_sequential", |b| {
+        b.iter_batched(
+            || {
+                let mut trie = Trie::<u64>::new();
+                for i in 0..size {
+                    trie.insert(i);
+                }
+                trie
+            },
+            |mut trie| {
+                for i in 0..size {
+                    black_box(trie.remove(i));
+                }
+            },
+            criterion::BatchSize::SmallInput,
+        );
+    });
+    
+    group.bench_function("BTreeSet_sequential", |b| {
+        b.iter_batched(
+            || {
+                let mut btree = BTreeSet::new();
+                for i in 0..size {
+                    btree.insert(i);
+                }
+                btree
+            },
+            |mut btree| {
+                for i in 0..size {
+                    black_box(btree.remove(&i));
+                }
+            },
+            criterion::BatchSize::SmallInput,
+        );
+    });
+    
+    // Benchmark removing every other key
+    group.bench_function("Trie_sparse", |b| {
+        b.iter_batched(
+            || {
+                let mut trie = Trie::<u64>::new();
+                for i in 0..size {
+                    trie.insert(i);
+                }
+                trie
+            },
+            |mut trie| {
+                for i in (0..size).step_by(2) {
+                    black_box(trie.remove(i));
+                }
+            },
+            criterion::BatchSize::SmallInput,
+        );
+    });
+    
+    group.bench_function("BTreeSet_sparse", |b| {
+        b.iter_batched(
+            || {
+                let mut btree = BTreeSet::new();
+                for i in 0..size {
+                    btree.insert(i);
+                }
+                btree
+            },
+            |mut btree| {
+                for i in (0..size).step_by(2) {
+                    black_box(btree.remove(&i));
+                }
+            },
+            criterion::BatchSize::SmallInput,
+        );
+    });
+    
+    group.finish();
+}
+
+/// Benchmark mixed workload (insert, contains, remove)
+fn bench_mixed_workload(c: &mut Criterion) {
+    let mut group = c.benchmark_group("mixed_workload");
+    
+    let size = 10_000u64;
+    
+    group.bench_function("Trie", |b| {
+        b.iter(|| {
+            let mut trie = Trie::<u64>::new();
+            
+            // Insert
+            for i in 0..size {
+                trie.insert(i);
+            }
+            
+            // Contains
+            for i in (0..size).step_by(10) {
+                black_box(trie.contains(i));
+            }
+            
+            // Remove half
+            for i in (0..size).step_by(2) {
+                trie.remove(i);
+            }
+            
+            // Insert again
+            for i in (0..size).step_by(2) {
+                trie.insert(i);
+            }
+        });
+    });
+    
+    group.bench_function("BTreeSet", |b| {
+        b.iter(|| {
+            let mut btree = BTreeSet::new();
+            
+            // Insert
+            for i in 0..size {
+                btree.insert(i);
+            }
+            
+            // Contains
+            for i in (0..size).step_by(10) {
+                black_box(btree.contains(&i));
+            }
+            
+            // Remove half
+            for i in (0..size).step_by(2) {
+                btree.remove(&i);
+            }
+            
+            // Insert again
+            for i in (0..size).step_by(2) {
+                btree.insert(i);
+            }
+        });
+    });
+    
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    bench_insert_sequential,
+    bench_insert_clustered,
+    bench_insert_random,
+    bench_contains,
+    bench_contains_clustered,
+    bench_remove,
+    bench_mixed_workload,
+);
 criterion_main!(benches);
