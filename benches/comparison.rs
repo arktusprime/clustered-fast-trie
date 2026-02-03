@@ -330,6 +330,124 @@ fn bench_mixed_workload(c: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmark successor operation
+fn bench_successor(c: &mut Criterion) {
+    let mut group = c.benchmark_group("successor");
+    
+    // Clustered data: keys with gaps
+    let keys: Vec<u64> = (0..100_000)
+        .filter(|x| x % 100 < 80) // 80% filled, 20% gaps
+        .collect();
+    
+    // Build datasets
+    let mut trie = Trie::<u64>::new();
+    let mut btree = BTreeSet::new();
+    for &key in &keys {
+        trie.insert(key);
+        btree.insert(key);
+    }
+    
+    // Queries: find successor for keys in gaps
+    let queries: Vec<u64> = (0..100_000)
+        .filter(|x| x % 100 >= 80) // Query gaps
+        .step_by(10)
+        .collect();
+    
+    group.bench_function("Trie", |b| {
+        b.iter(|| {
+            for &query in &queries {
+                black_box(trie.successor(query));
+            }
+        });
+    });
+    
+    group.bench_function("BTreeSet", |b| {
+        b.iter(|| {
+            for &query in &queries {
+                black_box(btree.range(query..).next().copied());
+            }
+        });
+    });
+    
+    group.finish();
+}
+
+/// Benchmark predecessor operation
+fn bench_predecessor(c: &mut Criterion) {
+    let mut group = c.benchmark_group("predecessor");
+    
+    // Clustered data: keys with gaps
+    let keys: Vec<u64> = (0..100_000)
+        .filter(|x| x % 100 < 80) // 80% filled, 20% gaps
+        .collect();
+    
+    // Build datasets
+    let mut trie = Trie::<u64>::new();
+    let mut btree = BTreeSet::new();
+    for &key in &keys {
+        trie.insert(key);
+        btree.insert(key);
+    }
+    
+    // Queries: find predecessor for keys in gaps
+    let queries: Vec<u64> = (0..100_000)
+        .filter(|x| x % 100 >= 80) // Query gaps
+        .step_by(10)
+        .collect();
+    
+    group.bench_function("Trie", |b| {
+        b.iter(|| {
+            for &query in &queries {
+                black_box(trie.predecessor(query));
+            }
+        });
+    });
+    
+    group.bench_function("BTreeSet", |b| {
+        b.iter(|| {
+            for &query in &queries {
+                black_box(btree.range(..query).next_back().copied());
+            }
+        });
+    });
+    
+    group.finish();
+}
+
+/// Benchmark successor/predecessor on sequential data (worst case)
+fn bench_successor_sequential(c: &mut Criterion) {
+    let mut group = c.benchmark_group("successor_sequential");
+    
+    // Sequential data: no gaps (worst case for successor - always next key)
+    let mut trie = Trie::<u64>::new();
+    let mut btree = BTreeSet::new();
+    for i in 0..100_000 {
+        trie.insert(i);
+        btree.insert(i);
+    }
+    
+    // Queries: find successor for existing keys
+    let queries: Vec<u64> = (0..100_000).step_by(100).collect();
+    
+    group.bench_function("Trie", |b| {
+        b.iter(|| {
+            for &query in &queries {
+                black_box(trie.successor(query));
+            }
+        });
+    });
+    
+    group.bench_function("BTreeSet", |b| {
+        b.iter(|| {
+            for &query in &queries {
+                black_box(btree.range(query..).nth(1));
+            }
+        });
+    });
+    
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_insert_sequential,
@@ -339,5 +457,8 @@ criterion_group!(
     bench_contains_clustered,
     bench_remove,
     bench_mixed_workload,
+    bench_successor,
+    bench_predecessor,
+    bench_successor_sequential,
 );
 criterion_main!(benches);
