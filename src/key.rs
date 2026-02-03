@@ -2,8 +2,33 @@
 
 /// Trait for unsigned integer keys used in the trie.
 ///
-/// Supports u32, u64, and u128 with zero-cost abstraction.
-/// Each type uses native register sizes for optimal performance.
+/// This trait is implemented for u32, u64, and u128, providing zero-cost abstraction
+/// over different key sizes. Each implementation is optimized for native register sizes.
+///
+/// # Supported Types
+///
+/// - **u32**: 4 bytes, 3 internal levels, single arena
+/// - **u64**: 8 bytes, 7 internal levels, split at level 4
+/// - **u128**: 16 bytes, 15 internal levels, splits at levels 4 and 12
+///
+/// # Example
+///
+/// ```rust
+/// use clustered_fast_trie::{Trie, TrieKey};
+///
+/// fn create_trie<K: TrieKey>() -> Trie<K> {
+///     Trie::new()
+/// }
+///
+/// let trie_u32 = create_trie::<u32>();
+/// let trie_u64 = create_trie::<u64>();
+/// let trie_u128 = create_trie::<u128>();
+/// ```
+///
+/// # Implementation Notes
+///
+/// Users typically don't need to interact with this trait directly.
+/// Just use `Trie::<u32>`, `Trie::<u64>`, or `Trie::<u128>`.
 pub trait TrieKey: Copy + Eq + PartialOrd + Sized {
     /// Number of internal levels (excludes leaf level).
     ///
