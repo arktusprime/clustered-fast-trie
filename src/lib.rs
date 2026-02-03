@@ -25,4 +25,4 @@ mod key;
 mod trie;
 
 pub use key::TrieKey;
-pub use trie::Trie;
+pub use trie::{Iter, RangeIter, Trie};

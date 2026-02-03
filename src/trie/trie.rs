@@ -1106,7 +1106,7 @@ impl<K: TrieKey> Trie<K> {
     /// # Performance
     /// O(1) - direct Vec indexing
     #[inline(always)]
-    fn get_node_arena(&self, arena_idx: u32) -> &crate::arena::Arena<crate::trie::Node> {
+    pub(crate) fn get_node_arena(&self, arena_idx: u32) -> &crate::arena::Arena<crate::trie::Node> {
         &self.arenas[arena_idx as usize].node_arena
     }
 
@@ -1142,8 +1142,32 @@ impl<K: TrieKey> Trie<K> {
     /// # Performance
     /// O(1) - direct Vec indexing
     #[inline(always)]
-    fn get_leaf_arena(&self, arena_idx: u32) -> &crate::arena::Arena<crate::trie::Leaf> {
+    pub(crate) fn get_leaf_arena(&self, arena_idx: u32) -> &crate::arena::Arena<crate::trie::Leaf> {
         &self.arenas[arena_idx as usize].leaf_arena
+    }
+
+    /// Get the number of arenas in the trie.
+    ///
+    /// # Returns
+    /// Number of arenas (root + child arenas)
+    ///
+    /// # Performance
+    /// O(1) - returns Vec length
+    #[inline(always)]
+    pub(crate) fn arenas_len(&self) -> usize {
+        self.arenas.len()
+    }
+
+    /// Get the first leaf link.
+    ///
+    /// # Returns
+    /// Packed link (arena_idx << 32 | leaf_idx) of first leaf, or EMPTY_LINK if empty
+    ///
+    /// # Performance
+    /// O(1) - returns cached value
+    #[inline(always)]
+    pub(crate) fn first_leaf_link(&self) -> u64 {
+        self.first_leaf
     }
 
     /// Get mutable reference to leaf arena by physical index.
@@ -1553,7 +1577,7 @@ impl<K: TrieKey> Trie<K> {
     /// # Performance
     /// O(log log U) - backtracks at most K::LEVELS levels, supports cross-arena navigation
     fn find_prev_leaf(&self, path: &[(u32, u8, u32)], path_len: usize) -> u64 {
-        use crate::trie::EMPTY_LINK;
+        use crate::trie::{pack_link, EMPTY_LINK};
 
         // Backtrack through path to find predecessor branch
         for i in (0..path_len).rev() {
@@ -1564,12 +1588,18 @@ impl<K: TrieKey> Trie<K> {
 
             // Check if there's a predecessor child at this level
             if let Some(pred_byte) = node.predecessor_child(byte) {
-                // Found predecessor branch - descend to maximum leaf
                 let pred_child_idx = node.get_child(pred_byte);
 
-                // Check if next level is a split level - need to switch arena
+                // Check if we're at the final internal level (level K::LEVELS-1)
+                // If so, pred_child_idx is a LEAF index, not a node index!
+                if i == path_len - 1 {
+                    // We're at final level - pred_child is a leaf
+                    return pack_link(arena_idx as u64, pred_child_idx);
+                }
+
+                // Not at final level - descend to maximum leaf
+                // Check if the level we're moving TO (i+1) is a split level
                 let next_arena_idx = if K::SPLIT_LEVELS.contains(&(i + 1)) {
-                    // Get child_arena_idx from the node we're descending into
                     let child_arena_idx = node.child_arena_idx;
                     if child_arena_idx as usize >= self.arenas.len() {
                         return EMPTY_LINK;
@@ -1603,7 +1633,7 @@ impl<K: TrieKey> Trie<K> {
     /// # Performance
     /// O(log log U) - backtracks at most K::LEVELS levels, supports cross-arena navigation
     fn find_next_leaf(&self, path: &[(u32, u8, u32)], path_len: usize) -> u64 {
-        use crate::trie::EMPTY_LINK;
+        use crate::trie::{pack_link, EMPTY_LINK};
 
         // Backtrack through path to find successor branch
         for i in (0..path_len).rev() {
@@ -1614,12 +1644,18 @@ impl<K: TrieKey> Trie<K> {
 
             // Check if there's a successor child at this level
             if let Some(succ_byte) = node.successor_child(byte) {
-                // Found successor branch - descend to minimum leaf
                 let succ_child_idx = node.get_child(succ_byte);
 
-                // Check if next level is a split level - need to switch arena
+                // Check if we're at the final internal level (level K::LEVELS-1)
+                // If so, succ_child_idx is a LEAF index, not a node index!
+                if i == path_len - 1 {
+                    // We're at final level - succ_child is a leaf
+                    return pack_link(arena_idx as u64, succ_child_idx);
+                }
+
+                // Not at final level - descend to minimum leaf
+                // Check if the level we're moving TO (i+1) is a split level
                 let next_arena_idx = if K::SPLIT_LEVELS.contains(&(i + 1)) {
-                    // Get child_arena_idx from the node we're descending into
                     let child_arena_idx = node.child_arena_idx;
                     if child_arena_idx as usize >= self.arenas.len() {
                         return EMPTY_LINK;

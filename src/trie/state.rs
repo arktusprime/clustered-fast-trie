@@ -160,6 +160,41 @@ mod tests {
     }
 
     #[test]
+    fn test_predecessor_child() {
+        let mut node = Node::new();
+        
+        // No children - no predecessor
+        assert_eq!(node.predecessor_child(100), None);
+        
+        // Add child at 50
+        node.set_child(50, 100);
+        
+        // predecessor of 100 should be 50
+        assert_eq!(node.predecessor_child(100), Some(50));
+        
+        // predecessor of 50 should be None
+        assert_eq!(node.predecessor_child(50), None);
+        
+        // Add child at 25
+        node.set_child(25, 200);
+        
+        // predecessor of 100 should still be 50
+        assert_eq!(node.predecessor_child(100), Some(50));
+        
+        // predecessor of 50 should be 25
+        assert_eq!(node.predecessor_child(50), Some(25));
+        
+        // predecessor of 1 (which should find child 0 if it exists)
+        assert_eq!(node.predecessor_child(1), None);
+        
+        // Add child at 0
+        node.set_child(0, 300);
+        
+        // predecessor of 1 should be 0
+        assert_eq!(node.predecessor_child(1), Some(0));
+    }
+
+    #[test]
     fn test_is_full_new_node() {
         let node = Node::new();
         assert!(!node.is_full());

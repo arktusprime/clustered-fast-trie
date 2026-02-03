@@ -89,14 +89,12 @@ pub fn next_set_bit(bitmap: &[AtomicU64; 4], after: u8) -> Option<u8> {
     let start_bit = start % 64;
 
     // Check remaining bits in start word
-    if start_bit > 0 {
-        let mask = !((1u64 << start_bit) - 1);
-        let value = bitmap[start_word].load(Ordering::Acquire);
-        let masked = value & mask;
-        if masked != 0 {
-            let bit_in_word = trailing_zeros(masked) as usize;
-            return Some((start_word * 64 + bit_in_word) as u8);
-        }
+    let mask = !((1u64 << start_bit) - 1);
+    let value = bitmap[start_word].load(Ordering::Acquire);
+    let masked = value & mask;
+    if masked != 0 {
+        let bit_in_word = trailing_zeros(masked) as usize;
+        return Some((start_word * 64 + bit_in_word) as u8);
     }
 
     // Check subsequent words

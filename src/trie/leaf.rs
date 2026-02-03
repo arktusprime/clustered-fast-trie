@@ -1,6 +1,7 @@
 //! Leaf node structure for storing actual keys.
 
 use crate::atomic::{AtomicU64, Ordering};
+use crate::key::TrieKey;
 
 /// Empty link sentinel for prev/next pointers (all bits set).
 pub const EMPTY_LINK: u64 = u64::MAX;
