@@ -448,6 +448,179 @@ fn bench_successor_sequential(c: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmark full iteration over all elements
+fn bench_iter_full(c: &mut Criterion) {
+    let mut group = c.benchmark_group("iter_full");
+    
+    // Build datasets with 100k elements
+    let mut trie = Trie::<u64>::new();
+    let mut btree = BTreeSet::new();
+    for i in 0..100_000 {
+        trie.insert(i);
+        btree.insert(i);
+    }
+    
+    group.bench_function("Trie", |b| {
+        b.iter(|| {
+            let mut count = 0u64;
+            for key in trie.iter() {
+                count = count.wrapping_add(black_box(key));
+            }
+            black_box(count)
+        });
+    });
+    
+    group.bench_function("BTreeSet", |b| {
+        b.iter(|| {
+            let mut count = 0u64;
+            for &key in btree.iter() {
+                count = count.wrapping_add(black_box(key));
+            }
+            black_box(count)
+        });
+    });
+    
+    group.finish();
+}
+
+/// Benchmark range queries over different range sizes
+fn bench_range_queries(c: &mut Criterion) {
+    let mut group = c.benchmark_group("range_queries");
+    
+    // Build clustered dataset: [0-10K], [20K-30K], [40K-50K], [60K-70K]
+    let mut trie = Trie::<u64>::new();
+    let mut btree = BTreeSet::new();
+    
+    for cluster_start in [0, 20_000, 40_000, 60_000] {
+        for i in cluster_start..(cluster_start + 10_000) {
+            trie.insert(i);
+            btree.insert(i);
+        }
+    }
+    
+    // Small range (100 elements)
+    group.bench_function("Trie/small_range", |b| {
+        b.iter(|| {
+            let mut count = 0u64;
+            for key in trie.range(1000..1100) {
+                count = count.wrapping_add(black_box(key));
+            }
+            black_box(count)
+        });
+    });
+    
+    group.bench_function("BTreeSet/small_range", |b| {
+        b.iter(|| {
+            let mut count = 0u64;
+            for &key in btree.range(1000..1100) {
+                count = count.wrapping_add(black_box(key));
+            }
+            black_box(count)
+        });
+    });
+    
+    // Medium range (1000 elements)
+    group.bench_function("Trie/medium_range", |b| {
+        b.iter(|| {
+            let mut count = 0u64;
+            for key in trie.range(5000..6000) {
+                count = count.wrapping_add(black_box(key));
+            }
+            black_box(count)
+        });
+    });
+    
+    group.bench_function("BTreeSet/medium_range", |b| {
+        b.iter(|| {
+            let mut count = 0u64;
+            for &key in btree.range(5000..6000) {
+                count = count.wrapping_add(black_box(key));
+            }
+            black_box(count)
+        });
+    });
+    
+    // Large range (10k elements - entire cluster)
+    group.bench_function("Trie/large_range", |b| {
+        b.iter(|| {
+            let mut count = 0u64;
+            for key in trie.range(0..10_000) {
+                count = count.wrapping_add(black_box(key));
+            }
+            black_box(count)
+        });
+    });
+    
+    group.bench_function("BTreeSet/large_range", |b| {
+        b.iter(|| {
+            let mut count = 0u64;
+            for &key in btree.range(0..10_000) {
+                count = count.wrapping_add(black_box(key));
+            }
+            black_box(count)
+        });
+    });
+    
+    // Cross-cluster range (spans gap)
+    group.bench_function("Trie/cross_cluster", |b| {
+        b.iter(|| {
+            let mut count = 0u64;
+            for key in trie.range(15_000..25_000) {
+                count = count.wrapping_add(black_box(key));
+            }
+            black_box(count)
+        });
+    });
+    
+    group.bench_function("BTreeSet/cross_cluster", |b| {
+        b.iter(|| {
+            let mut count = 0u64;
+            for &key in btree.range(15_000..25_000) {
+                count = count.wrapping_add(black_box(key));
+            }
+            black_box(count)
+        });
+    });
+    
+    group.finish();
+}
+
+/// Benchmark range iteration on sparse data
+fn bench_range_sparse(c: &mut Criterion) {
+    let mut group = c.benchmark_group("range_sparse");
+    
+    // Sparse data: 1% filled (every 100th element)
+    let mut trie = Trie::<u64>::new();
+    let mut btree = BTreeSet::new();
+    for i in (0..100_000).step_by(100) {
+        trie.insert(i);
+        btree.insert(i);
+    }
+    
+    // Query wide range but few elements (1000 elements out of 100k range)
+    group.bench_function("Trie", |b| {
+        b.iter(|| {
+            let mut count = 0u64;
+            for key in trie.range(0..100_000) {
+                count = count.wrapping_add(black_box(key));
+            }
+            black_box(count)
+        });
+    });
+    
+    group.bench_function("BTreeSet", |b| {
+        b.iter(|| {
+            let mut count = 0u64;
+            for &key in btree.range(0..100_000) {
+                count = count.wrapping_add(black_box(key));
+            }
+            black_box(count)
+        });
+    });
+    
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_insert_sequential,
@@ -460,5 +633,8 @@ criterion_group!(
     bench_successor,
     bench_predecessor,
     bench_successor_sequential,
+    bench_iter_full,
+    bench_range_queries,
+    bench_range_sparse,
 );
 criterion_main!(benches);
