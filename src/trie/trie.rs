@@ -50,7 +50,7 @@ pub struct Trie<K: TrieKey> {
     /// - u32: no splits (always 1 arena)
     /// - u64: split at level 4 (1 root + N child arenas)
     /// - u128: splits at levels 4 and 12 (1 root + N L1 + M L2 arenas)
-    arenas: alloc::vec::Vec<ChildArenas>,
+    arenas: alloc::vec::Vec<ChildArenas<K>>,
 
     /// Number of keys stored in the trie
     len: usize,
@@ -638,7 +638,7 @@ impl<K: TrieKey> Trie<K> {
             let next_leaf = next_leaf_arena.get(next_leaf_idx);
             if let Some(min_bit) = crate::bitmap::min_bit(&next_leaf.bitmap) {
                 // Found in next leaf - O(1) for adjacent leaves!
-                let mut key_value = (next_leaf.prefix as u128) << 8;
+                let mut key_value = next_leaf.prefix.to_u128() << 8;
                 key_value |= min_bit as u128;
                 return Some(K::from_u128(key_value));
             }
@@ -675,7 +675,7 @@ impl<K: TrieKey> Trie<K> {
         let next_leaf = leaf_arena.get(next_leaf_idx);
 
         if let Some(min_bit) = crate::bitmap::min_bit(&next_leaf.bitmap) {
-            let mut key_value = (next_leaf.prefix as u128) << 8;
+            let mut key_value = next_leaf.prefix.to_u128() << 8;
             key_value |= min_bit as u128;
             return Some(K::from_u128(key_value));
         }
@@ -855,7 +855,7 @@ impl<K: TrieKey> Trie<K> {
             let prev_leaf = prev_leaf_arena.get(prev_leaf_idx);
             if let Some(max_bit) = crate::bitmap::max_bit(&prev_leaf.bitmap) {
                 // Found in prev leaf - O(1) for adjacent leaves!
-                let mut key_value = (prev_leaf.prefix as u128) << 8;
+                let mut key_value = prev_leaf.prefix.to_u128() << 8;
                 key_value |= max_bit as u128;
                 return Some(K::from_u128(key_value));
             }
@@ -892,7 +892,7 @@ impl<K: TrieKey> Trie<K> {
         let prev_leaf = leaf_arena.get(prev_leaf_idx);
 
         if let Some(max_bit) = crate::bitmap::max_bit(&prev_leaf.bitmap) {
-            let mut key_value = (prev_leaf.prefix as u128) << 8;
+            let mut key_value = prev_leaf.prefix.to_u128() << 8;
             key_value |= max_bit as u128;
             return Some(K::from_u128(key_value));
         }
@@ -1142,7 +1142,7 @@ impl<K: TrieKey> Trie<K> {
     /// # Performance
     /// O(1) - direct Vec indexing
     #[inline(always)]
-    pub(crate) fn get_leaf_arena(&self, arena_idx: u32) -> &crate::arena::Arena<crate::trie::Leaf> {
+    pub(crate) fn get_leaf_arena(&self, arena_idx: u32) -> &crate::arena::Arena<crate::trie::Leaf<K>> {
         &self.arenas[arena_idx as usize].leaf_arena
     }
 
@@ -1184,7 +1184,7 @@ impl<K: TrieKey> Trie<K> {
     /// # Performance
     /// O(1) - direct Vec indexing
     #[inline(always)]
-    fn get_leaf_arena_mut(&mut self, arena_idx: u32) -> &mut crate::arena::Arena<crate::trie::Leaf> {
+    fn get_leaf_arena_mut(&mut self, arena_idx: u32) -> &mut crate::arena::Arena<crate::trie::Leaf<K>> {
         &mut self.arenas[arena_idx as usize].leaf_arena
     }
 
@@ -1357,7 +1357,7 @@ impl<K: TrieKey> Trie<K> {
             idx
         } else {
             // Create new leaf and link it
-            let prefix = key.prefix().to_u128() as u64;
+            let prefix = key.prefix();
 
             let leaf_arena = self.get_leaf_arena_mut(current_arena_idx);
             let new_leaf_idx = leaf_arena.alloc(prefix);

@@ -1,6 +1,7 @@
 //! Child arenas for hierarchical arena allocation.
 
 use crate::arena::Arena;
+use crate::key::TrieKey;
 use crate::trie::{Leaf, Node};
 
 /// Child arenas owned by a node at split level.
@@ -8,9 +9,12 @@ use crate::trie::{Leaf, Node};
 /// Nodes at split levels own arenas for their entire subtree,
 /// enabling hierarchical arena allocation without global lookup.
 ///
+/// # Type Parameters
+/// * `K` - Key type (u32, u64, or u128)
+///
 /// # Memory Layout
 /// - node_arena: Arena<Node> for internal nodes in subtree
-/// - leaf_arena: Arena<Leaf> for leaf nodes in subtree
+/// - leaf_arena: Arena<Leaf<K>> for leaf nodes in subtree
 ///
 /// # Ownership
 /// - Created when node at split level is allocated
@@ -22,15 +26,15 @@ use crate::trie::{Leaf, Node};
 /// - Perfect cache locality (arena near parent node)
 /// - No global lookup overhead
 #[derive(Debug)]
-pub struct ChildArenas {
+pub struct ChildArenas<K: TrieKey> {
     /// Arena for internal nodes in this subtree
     pub node_arena: Arena<Node>,
 
     /// Arena for leaf nodes in this subtree
-    pub leaf_arena: Arena<Leaf>,
+    pub leaf_arena: Arena<Leaf<K>>,
 }
 
-impl ChildArenas {
+impl<K: TrieKey> ChildArenas<K> {
     /// Create new empty child arenas.
     ///
     /// Initializes both node and leaf arenas with default capacity.
@@ -45,7 +49,7 @@ impl ChildArenas {
     }
 }
 
-impl Default for ChildArenas {
+impl<K: TrieKey> Default for ChildArenas<K> {
     fn default() -> Self {
         Self::new()
     }
@@ -57,14 +61,14 @@ mod tests {
 
     #[test]
     fn test_new_child_arenas() {
-        let arenas = ChildArenas::new();
+        let arenas = ChildArenas::<u64>::new();
         assert_eq!(arenas.node_arena.len(), 0);
         assert_eq!(arenas.leaf_arena.len(), 0);
     }
 
     #[test]
     fn test_default() {
-        let arenas = ChildArenas::default();
+        let arenas = ChildArenas::<u64>::default();
         assert_eq!(arenas.node_arena.len(), 0);
         assert_eq!(arenas.leaf_arena.len(), 0);
     }

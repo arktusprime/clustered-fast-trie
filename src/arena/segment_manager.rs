@@ -1,6 +1,7 @@
 //! Segment manager for multi-tenant memory management.
 
 use crate::arena::{KeyRange, SegmentCache, SegmentId, SegmentMeta};
+use crate::key::TrieKey;
 use alloc::vec::Vec;
 
 /// Segment manager for multi-tenant trie.
@@ -8,9 +9,12 @@ use alloc::vec::Vec;
 /// Manages segments and per-segment caches for optimal performance.
 /// Arenas are now stored in nodes (hierarchical allocation), not here.
 ///
+/// # Type Parameters
+/// * `K` - Key type (u32, u64, or u128)
+///
 /// # Architecture
 /// - segments: Vec<Option<SegmentMeta>> - segment metadata indexed by perm_key
-/// - segment_caches: Vec<Option<SegmentCache>> - per-segment hot path caches
+/// - segment_caches: Vec<Option<SegmentCache<K>>> - per-segment hot path caches
 ///
 /// # Memory Layout
 /// - Lazy allocation: segments and caches created on-demand
@@ -23,18 +27,18 @@ use alloc::vec::Vec;
 /// - Minimal memory overhead (only metadata, no arenas)
 #[derive(Debug)]
 #[allow(dead_code)]
-pub struct SegmentManager {
+pub struct SegmentManager<K: TrieKey> {
     /// Segment metadata indexed by permanent key (perm_key).
     /// None = segment not created, Some = segment exists.
     segments: Vec<Option<SegmentMeta>>,
 
     /// Per-segment caches for hot path optimization.
     /// Parallel to segments Vec, same indexing by perm_key.
-    segment_caches: Vec<Option<SegmentCache>>,
+    segment_caches: Vec<Option<SegmentCache<K>>>,
 }
 
 #[allow(dead_code)]
-impl SegmentManager {
+impl<K: TrieKey> SegmentManager<K> {
     /// Create a new empty segment manager.
     ///
     /// # Performance
@@ -116,7 +120,7 @@ impl SegmentManager {
     ///
     /// # Performance
     /// O(1) - direct Vec indexing
-    pub fn get_segment_cache(&self, segment_id: SegmentId) -> Option<&SegmentCache> {
+    pub fn get_segment_cache(&self, segment_id: SegmentId) -> Option<&SegmentCache<K>> {
         let perm_key = segment_id as usize;
         self.segment_caches
             .get(perm_key)
@@ -133,7 +137,7 @@ impl SegmentManager {
     ///
     /// # Performance
     /// O(1) - direct Vec indexing
-    pub fn get_segment_cache_mut(&mut self, segment_id: SegmentId) -> Option<&mut SegmentCache> {
+    pub fn get_segment_cache_mut(&mut self, segment_id: SegmentId) -> Option<&mut SegmentCache<K>> {
         let perm_key = segment_id as usize;
         self.segment_caches
             .get_mut(perm_key)
@@ -141,7 +145,7 @@ impl SegmentManager {
     }
 }
 
-impl Default for SegmentManager {
+impl<K: TrieKey> Default for SegmentManager<K> {
     fn default() -> Self {
         Self::new()
     }
@@ -153,14 +157,14 @@ mod tests {
 
     #[test]
     fn test_new_segment_manager() {
-        let manager = SegmentManager::new();
+        let manager = SegmentManager::<u64>::new();
         assert_eq!(manager.segments.len(), 0);
         assert_eq!(manager.segment_caches.len(), 0);
     }
 
     #[test]
     fn test_create_segment() {
-        let mut manager = SegmentManager::new();
+        let mut manager = SegmentManager::<u64>::new();
 
         let key_range = KeyRange {
             start: 0,
@@ -178,7 +182,7 @@ mod tests {
 
     #[test]
     fn test_get_segment_meta() {
-        let mut manager = SegmentManager::new();
+        let mut manager = SegmentManager::<u64>::new();
 
         let key_range = KeyRange {
             start: 100,
@@ -194,7 +198,7 @@ mod tests {
 
     #[test]
     fn test_get_segment_cache() {
-        let mut manager = SegmentManager::new();
+        let mut manager = SegmentManager::<u64>::new();
 
         let key_range = KeyRange {
             start: 0,
@@ -209,7 +213,7 @@ mod tests {
 
     #[test]
     fn test_multiple_segments() {
-        let mut manager = SegmentManager::new();
+        let mut manager = SegmentManager::<u64>::new();
 
         let seg1 = manager.create_segment(
             KeyRange {
@@ -238,7 +242,7 @@ mod tests {
 
     #[test]
     fn test_default() {
-        let manager = SegmentManager::default();
+        let manager = SegmentManager::<u64>::default();
         assert_eq!(manager.segments.len(), 0);
     }
 }

@@ -1,9 +1,14 @@
 //! Per-segment caching for hot path optimization.
 
+use crate::key::TrieKey;
+
 /// Per-segment cache for hot path optimization.
 ///
 /// Caches the last accessed path to optimize sequential inserts, which are
 /// the primary use case for clustered data (Kafka offsets, time-series).
+///
+/// # Type Parameters
+/// * `K` - Key type (u32, u64, or u128)
 ///
 /// # Performance
 /// - Cache hit (sequential inserts): O(1), 0.8-1.2 ns
@@ -11,7 +16,7 @@
 /// - Hit rate: 80-90% for sequential data
 ///
 /// # Memory
-/// - Size: ~140 bytes per segment
+/// - Size: ~100-156 bytes per segment (depends on K)
 /// - Overhead: negligible compared to data size (GB-TB)
 ///
 /// # Cache Invalidation
@@ -20,12 +25,13 @@
 /// - Defragmentation updates arena indices automatically
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
-pub struct SegmentCache {
+pub struct SegmentCache<K: TrieKey> {
     /// Last accessed leaf index (hot path optimization)
     last_leaf_idx: u32,
 
     /// Prefix of last accessed leaf
-    last_prefix: u64,
+    /// Type matches key type K for optimal memory usage
+    last_prefix: K,
 
     /// Path cache: node indices at each level
     /// For u32: 3 levels, for u64: 7 levels, for u128: 15 levels
@@ -36,7 +42,7 @@ pub struct SegmentCache {
 }
 
 #[allow(dead_code)]
-impl SegmentCache {
+impl<K: TrieKey> SegmentCache<K> {
     /// Create a new empty segment cache.
     ///
     /// # Performance
@@ -44,7 +50,7 @@ impl SegmentCache {
     pub fn new() -> Self {
         Self {
             last_leaf_idx: u32::MAX, // Invalid index
-            last_prefix: 0,
+            last_prefix: K::from_u128(0),
             path_nodes: [u32::MAX; 15], // Invalid indices
             path_bytes: [0; 15],
         }
@@ -61,7 +67,7 @@ impl SegmentCache {
     /// # Performance
     /// O(1) - simple comparison
     #[inline]
-    pub fn is_valid(&self, prefix: u64) -> bool {
+    pub fn is_valid(&self, prefix: K) -> bool {
         self.last_prefix == prefix && self.last_leaf_idx != u32::MAX
     }
 
@@ -125,7 +131,7 @@ impl SegmentCache {
     ///
     /// # Performance
     /// O(1) - array copy operations
-    pub fn update(&mut self, prefix: u64, leaf_idx: u32, path_nodes: &[u32], path_bytes: &[u8]) {
+    pub fn update(&mut self, prefix: K, leaf_idx: u32, path_nodes: &[u32], path_bytes: &[u8]) {
         self.last_prefix = prefix;
         self.last_leaf_idx = leaf_idx;
 
@@ -152,11 +158,11 @@ impl SegmentCache {
     /// O(1) - sets invalid marker
     pub fn invalidate(&mut self) {
         self.last_leaf_idx = u32::MAX;
-        self.last_prefix = 0;
+        self.last_prefix = K::from_u128(0);
     }
 }
 
-impl Default for SegmentCache {
+impl<K: TrieKey> Default for SegmentCache<K> {
     fn default() -> Self {
         Self::new()
     }
@@ -169,7 +175,7 @@ mod tests {
 
     #[test]
     fn test_new_cache() {
-        let cache = SegmentCache::new();
+        let cache = SegmentCache::<u64>::new();
         assert_eq!(cache.last_leaf_idx, u32::MAX);
         assert_eq!(cache.last_prefix, 0);
         assert!(!cache.is_valid(123));
@@ -177,14 +183,14 @@ mod tests {
 
     #[test]
     fn test_default() {
-        let cache = SegmentCache::default();
+        let cache = SegmentCache::<u64>::default();
         assert_eq!(cache.last_leaf_idx, u32::MAX);
         assert!(!cache.is_valid(456));
     }
 
     #[test]
     fn test_update_and_validate() {
-        let mut cache = SegmentCache::new();
+        let mut cache = SegmentCache::<u64>::new();
 
         let path_nodes = [10, 20, 30];
         let path_bytes = [1, 2, 3];
@@ -206,7 +212,7 @@ mod tests {
 
     #[test]
     fn test_update_max_levels() {
-        let mut cache = SegmentCache::new();
+        let mut cache = SegmentCache::<u64>::new();
 
         // Test with maximum 15 levels
         let path_nodes: Vec<u32> = (0..20).collect(); // 20 elements, should truncate to 15
@@ -230,7 +236,7 @@ mod tests {
 
     #[test]
     fn test_invalidate() {
-        let mut cache = SegmentCache::new();
+        let mut cache = SegmentCache::<u64>::new();
 
         cache.update(0x1234567890ABCDEF, 42, &[10, 20], &[1, 2]);
         assert!(cache.is_valid(0x1234567890ABCDEF));
@@ -244,21 +250,35 @@ mod tests {
     fn test_cache_size() {
         use core::mem;
 
-        // Verify cache size is approximately 140 bytes as specified
-        let size = mem::size_of::<SegmentCache>();
+        // Verify cache size for different key types
+        let size_u32 = mem::size_of::<SegmentCache<u32>>();
+        let size_u64 = mem::size_of::<SegmentCache<u64>>();
+        let size_u128 = mem::size_of::<SegmentCache<u128>>();
 
-        // Expected: 4 + 8 + 15*4 + 15*1 = 4 + 8 + 60 + 15 = 87 bytes
-        // With padding: likely ~88-96 bytes (well under 140 bytes target)
+        // Expected sizes (approximate, with padding):
+        // u32: 4 + 4 + 15*4 + 15*1 = 4 + 4 + 60 + 15 = 83 bytes (~88 with padding)
+        // u64: 4 + 8 + 15*4 + 15*1 = 4 + 8 + 60 + 15 = 87 bytes (~96 with padding)
+        // u128: 4 + 16 + 15*4 + 15*1 = 4 + 16 + 60 + 15 = 95 bytes (~96-104 with padding)
         assert!(
-            size <= 140,
-            "SegmentCache size {} exceeds 140 bytes target",
-            size
+            size_u32 <= 96,
+            "SegmentCache<u32> size {} exceeds 96 bytes",
+            size_u32
+        );
+        assert!(
+            size_u64 <= 104,
+            "SegmentCache<u64> size {} exceeds 104 bytes",
+            size_u64
+        );
+        assert!(
+            size_u128 <= 112,
+            "SegmentCache<u128> size {} exceeds 112 bytes",
+            size_u128
         );
     }
 
     #[test]
     fn test_clone() {
-        let mut cache1 = SegmentCache::new();
+        let mut cache1 = SegmentCache::<u64>::new();
         cache1.update(0x1234567890ABCDEF, 42, &[10, 20], &[1, 2]);
 
         let cache2 = cache1.clone();

@@ -142,7 +142,7 @@ impl Arena<Node> {
     }
 }
 
-impl Arena<Leaf> {
+impl<K: crate::key::TrieKey> Arena<Leaf<K>> {
     /// Allocate a new leaf with given prefix.
     ///
     /// # Arguments
@@ -156,7 +156,7 @@ impl Arena<Leaf> {
     ///
     /// Hot path - always inlined.
     #[inline(always)]
-    pub fn alloc(&mut self, prefix: u64) -> u32 {
+    pub fn alloc(&mut self, prefix: K) -> u32 {
         let index = self.elements.len() as u32;
         self.elements.push(Leaf::new(prefix));
         index
@@ -178,8 +178,9 @@ pub type NodeArena = Arena<Node>;
 /// Type alias for Leaf arena.
 ///
 /// Used for storing leaf nodes (256-bit bitmaps).
+/// Generic over key type K.
 #[allow(dead_code)]
-pub type LeafArena = Arena<Leaf>;
+pub type LeafArena<K> = Arena<Leaf<K>>;
 
 #[cfg(test)]
 mod tests {
@@ -214,7 +215,7 @@ mod tests {
 
     #[test]
     fn test_leaf_arena_alloc() {
-        let mut arena = Arena::<Leaf>::new();
+        let mut arena = Arena::<Leaf<u64>>::new();
 
         let idx0 = arena.alloc(0x12345600);
         assert_eq!(idx0, 0);

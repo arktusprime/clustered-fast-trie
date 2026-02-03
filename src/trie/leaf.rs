@@ -38,12 +38,15 @@ pub fn unpack_link(packed: u64) -> (u64, u32) {
 /// Each leaf represents a 256-key range identified by a prefix.
 /// Keys within the range are stored as bits in the bitmap.
 ///
+/// # Type Parameters
+/// * `K` - Key type (u32, u64, or u128)
+///
 /// # Memory Layout
 /// - `bitmap`: 32 bytes (256 bits = 4 × u64)
-/// - `prefix`: 8 bytes (key prefix, last byte = 0)
+/// - `prefix`: 4/8/16 bytes (key prefix, last byte = 0, type K)
 /// - `next`: 8 bytes (packed arena_idx and leaf_idx)
 /// - `prev`: 8 bytes (packed arena_idx and leaf_idx)
-/// - Total: 56 bytes per leaf
+/// - Total: 52 bytes (u32), 56 bytes (u64), 64 bytes (u128)
 ///
 /// # Linked List
 /// Leaves are linked in sorted order by prefix for O(1) per-element iteration.
@@ -63,7 +66,7 @@ pub fn unpack_link(packed: u64) -> (u64, u32) {
 /// - Next/prev updated atomically during list operations
 #[derive(Debug)]
 #[repr(C)]
-pub struct Leaf {
+pub struct Leaf<K: TrieKey> {
     /// Bitmap indicating which keys exist (256 bits).
     ///
     /// Bit index corresponds to last byte of key.
@@ -77,8 +80,13 @@ pub struct Leaf {
     /// Identifies which 256-key range this leaf represents.
     /// Last byte is always 0 (masked out).
     ///
+    /// Type matches key type K for optimal memory usage:
+    /// - u32: 4 bytes (3 bytes prefix + 1 byte padding)
+    /// - u64: 8 bytes (7 bytes prefix + 1 byte padding)
+    /// - u128: 16 bytes (15 bytes prefix + 1 byte padding)
+    ///
     /// Immutable after leaf creation.
-    pub prefix: u64,
+    pub prefix: K,
 
     /// Next leaf in sorted order (packed: arena_idx << 32 | leaf_idx).
     ///
@@ -95,7 +103,7 @@ pub struct Leaf {
     pub prev: u64,
 }
 
-impl Leaf {
+impl<K: TrieKey> Leaf<K> {
     /// Create a new empty leaf with given prefix.
     ///
     /// # Arguments
@@ -109,7 +117,7 @@ impl Leaf {
     ///
     /// Hot path for arena allocation - always inlined.
     #[inline(always)]
-    pub fn new(prefix: u64) -> Self {
+    pub fn new(prefix: K) -> Self {
         Leaf {
             bitmap: [
                 AtomicU64::new(0),
@@ -124,7 +132,7 @@ impl Leaf {
     }
 }
 
-impl Clone for Leaf {
+impl<K: TrieKey> Clone for Leaf<K> {
     fn clone(&self) -> Self {
         Leaf {
             bitmap: [
@@ -147,7 +155,7 @@ mod tests {
     #[test]
     fn test_new_leaf() {
         let prefix = 0x12345600u64;
-        let leaf = Leaf::new(prefix);
+        let leaf = Leaf::<u64>::new(prefix);
 
         // Bitmap should be empty
         assert_eq!(leaf.bitmap[0].load(Ordering::Relaxed), 0);
@@ -167,15 +175,17 @@ mod tests {
     fn test_leaf_size() {
         use core::mem::size_of;
 
-        // Verify expected memory layout
-        assert_eq!(size_of::<Leaf>(), 56); // 32 + 8 + 8 + 8 = 56 bytes
+        // Verify expected memory layout for different key types
+        // Note: u32 has padding to align to 8-byte boundary
+        assert_eq!(size_of::<Leaf<u32>>(), 56); // 32 + 4 + 4(padding) + 8 + 8 = 56 bytes
+        assert_eq!(size_of::<Leaf<u64>>(), 56); // 32 + 8 + 8 + 8 = 56 bytes
+        assert_eq!(size_of::<Leaf<u128>>(), 64); // 32 + 16 + 8 + 8 = 64 bytes
         assert_eq!(size_of::<[AtomicU64; 4]>(), 32);
-        assert_eq!(size_of::<u64>(), 8);
     }
 
     #[test]
     fn test_clone() {
-        let mut leaf = Leaf::new(0x12345600);
+        let mut leaf = Leaf::<u64>::new(0x12345600);
         leaf.bitmap[0].store(0xFF, Ordering::Relaxed);
         leaf.next = pack_link(1, 42);
         leaf.prev = pack_link(0, 10);

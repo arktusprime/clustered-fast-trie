@@ -127,7 +127,7 @@ impl<'a, K: TrieKey> Iter<'a, K> {
 
             // Reconstruct key from leaf prefix and bit
             // prefix already includes position for last byte, just OR the bit
-            let key_value = (leaf.prefix as u128) | (bit as u128);
+            let key_value = leaf.prefix.to_u128() | (bit as u128);
             return Some(K::from_u128(key_value));
         }
 
@@ -364,7 +364,7 @@ impl<'a, K: TrieKey> RangeIter<'a, K> {
         if let Some(bit) = bit_opt {
             // Reconstruct key from leaf prefix and bit
             // prefix already includes position for last byte, just OR the bit
-            let key_value = (leaf.prefix as u128) | (bit as u128);
+            let key_value = leaf.prefix.to_u128() | (bit as u128);
             let key = K::from_u128(key_value);
 
             // Check if key is within range
