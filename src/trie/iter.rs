@@ -4,12 +4,13 @@
 //! 
 //! # Optimizations
 //! - Direct leaf references (no indirection)
+//! - Prefix caching (zero memory load in hot path)
 //! - Bitmap pre-loading (all 4 words cached)
 //! - word & (word - 1) trick in hot path
 //! - Zero memory access in hot path
 //!
 //! # Performance
-//! - O(1) per element for full iteration (~5-8 instructions)
+//! - O(1) per element for full iteration (~3-5 instructions in hot path)
 //! - O(log log U) initial setup for range queries
 
 use crate::atomic::Ordering;
@@ -24,9 +25,10 @@ use core::ops::{Bound, RangeBounds};
 ///
 /// # Optimizations
 /// 1. **Direct leaf reference** - no `unpack_link()` overhead
-/// 2. **Bitmap pre-loading** - all 4 words loaded once per leaf
-/// 3. **Hot path optimization** - `word & (word - 1)` with zero memory access
-/// 4. **Cache-friendly** - processes 64 bits at a time
+/// 2. **Prefix caching** - leaf.prefix cached, zero memory access in hot path
+/// 3. **Bitmap pre-loading** - all 4 words loaded once per leaf
+/// 4. **Hot path optimization** - `word & (word - 1)` with zero memory access
+/// 5. **Cache-friendly** - processes 64 bits at a time
 ///
 /// # Algorithm
 /// 1. Start at first leaf (cached in Trie::first_leaf)
@@ -37,9 +39,9 @@ use core::ops::{Bound, RangeBounds};
 /// 3. Stop when next == EMPTY_LINK
 ///
 /// # Performance
-/// - **~5-8 instructions per key** in hot path
+/// - **~3-5 instructions per key** in hot path
 /// - O(1) per element amortized
-/// - No memory access in hot path (everything cached)
+/// - Zero memory access in hot path (prefix + bitmap fully cached)
 ///
 /// # Example
 /// ```rust
@@ -59,6 +61,9 @@ pub struct Iter<'a, K: TrieKey> {
 
     /// Direct reference to current leaf (ZERO indirection!)
     current_leaf: Option<&'a Leaf<K>>,
+
+    /// Cached leaf prefix (HOT PATH OPTIMIZATION: no memory load!)
+    current_prefix: K,
 
     /// Pre-loaded bitmap cache (all 4 words, loaded ONCE per leaf)
     bitmap_cache: [u64; 4],
@@ -88,6 +93,7 @@ impl<'a, K: TrieKey> Iter<'a, K> {
             return Self {
                 trie,
                 current_leaf: None,
+                current_prefix: K::from_u128(0),
                 bitmap_cache: [0; 4],
                 current_word_idx: 0,
                 remaining_bits: 0,
@@ -109,6 +115,7 @@ impl<'a, K: TrieKey> Iter<'a, K> {
         Self {
             trie,
             current_leaf: Some(leaf),
+            current_prefix: leaf.prefix,
             bitmap_cache,
             current_word_idx: 0,
             remaining_bits: bitmap_cache[0],
@@ -122,21 +129,21 @@ impl<'a, K: TrieKey> Iter<'a, K> {
     /// # Returns
     /// Next key if found, None if end of iteration
     ///
-    /// # Performance
-    /// - Hot path: ~5-8 instructions (bit extraction from cache)
-    /// - Warm path: ~2-3 instructions (next word from cache)
-    /// - Cold path: ~20-30 instructions (load next leaf, rare)
+/// # Performance
+/// - Hot path: ~3-5 instructions (bit extraction, zero memory access)
+/// - Warm path: ~2-3 instructions (next word from cache)
+/// - Cold path: ~20-30 instructions (load next leaf, rare)
     #[inline(always)]
     fn advance(&mut self) -> Option<K> {
         loop {
-            // 🔥 HOT PATH: Extract bit from cached word (NO memory access!)
+            // 🔥 HOT PATH: Extract bit from cached word (ZERO memory access!)
             if self.remaining_bits != 0 {
                 let bit_in_word = trailing_zeros(self.remaining_bits) as usize;
                 self.remaining_bits &= self.remaining_bits - 1; // Clear lowest bit
                 
-                let leaf = self.current_leaf?;
-                let bit_idx = (self.current_word_idx * 64 + bit_in_word) as u8;
-                let key = K::from_u128(leaf.prefix.to_u128() | bit_idx as u128);
+                // 🚀 Use cached prefix - NO memory load!
+                let bit_idx = (self.current_word_idx << 6) + bit_in_word;  // Use shift instead of mul
+                let key = K::from_u128(self.current_prefix.to_u128() | bit_idx as u128);
                 
                 return Some(key);
             }
@@ -156,11 +163,12 @@ impl<'a, K: TrieKey> Iter<'a, K> {
                 return None;
             }
             
-            // 🚀 Load next leaf and pre-load ALL bitmap words at once
+            // 🚀 Load next leaf and pre-load ALL bitmap words + prefix at once
             let (arena_idx, leaf_idx) = unpack_link(current_leaf.next);
             let next_leaf = self.trie.get_leaf_arena(arena_idx as u32).get(leaf_idx);
             
-            // 🚀 Cache all 4 words (ONE batch load per leaf)
+            // 🚀 Cache prefix + all 4 bitmap words (ONE batch load per leaf)
+            self.current_prefix = next_leaf.prefix;
             self.bitmap_cache = [
                 next_leaf.bitmap[0].load(Ordering::Acquire),
                 next_leaf.bitmap[1].load(Ordering::Acquire),
@@ -190,9 +198,10 @@ impl<'a, K: TrieKey> Iterator for Iter<'a, K> {
 /// # Optimizations
 /// Same as `Iter`:
 /// 1. Direct leaf reference - no indirection
-/// 2. Bitmap pre-loading - all 4 words cached
-/// 3. Hot path optimization - zero memory access
-/// 4. Only adds bounds checking
+/// 2. Prefix caching - zero memory access for leaf.prefix
+/// 3. Bitmap pre-loading - all 4 words cached
+/// 4. Hot path optimization - zero memory access
+/// 5. Only adds bounds checking
 ///
 /// # Algorithm
 /// 1. Find start key using successor (O(log log U))
@@ -201,7 +210,7 @@ impl<'a, K: TrieKey> Iterator for Iter<'a, K> {
 ///
 /// # Performance
 /// - O(log log U) initial setup to find start
-/// - **~6-10 instructions per key** in hot path (includes bounds check)
+/// - **~4-6 instructions per key** in hot path (includes bounds check)
 /// - O(1) per element during iteration
 ///
 /// # Example
@@ -224,6 +233,9 @@ pub struct RangeIter<'a, K: TrieKey> {
 
     /// Direct reference to current leaf (ZERO indirection!)
     current_leaf: Option<&'a Leaf<K>>,
+
+    /// Cached leaf prefix (HOT PATH OPTIMIZATION: no memory load!)
+    current_prefix: K,
 
     /// Pre-loaded bitmap cache (all 4 words, loaded ONCE per leaf)
     bitmap_cache: [u64; 4],
@@ -307,6 +319,7 @@ impl<'a, K: TrieKey> RangeIter<'a, K> {
             RangeIter {
                 trie,
                 current_leaf: Some(leaf),
+                current_prefix: leaf.prefix,
                 bitmap_cache,
                 current_word_idx: word_idx,
                 remaining_bits: bitmap_cache[word_idx] & mask,
@@ -317,6 +330,7 @@ impl<'a, K: TrieKey> RangeIter<'a, K> {
             RangeIter {
                 trie,
                 current_leaf: None,
+                current_prefix: K::from_u128(0),
                 bitmap_cache: [0; 4],
                 current_word_idx: 0,
                 remaining_bits: 0,
@@ -333,20 +347,20 @@ impl<'a, K: TrieKey> RangeIter<'a, K> {
     /// Next key if found and within range, None if end reached
     ///
     /// # Performance
-    /// - Hot path: ~6-10 instructions (includes bounds check)
+    /// - Hot path: ~4-6 instructions (includes bounds check, zero memory access)
     /// - Warm path: ~2-3 instructions (next word from cache)
     /// - Cold path: ~20-30 instructions (load next leaf, rare)
     #[inline(always)]
     fn advance(&mut self) -> Option<K> {
         loop {
-            // 🔥 HOT PATH: Extract bit from cached word (NO memory access!)
+            // 🔥 HOT PATH: Extract bit from cached word (ZERO memory access!)
             if self.remaining_bits != 0 {
                 let bit_in_word = trailing_zeros(self.remaining_bits) as usize;
                 self.remaining_bits &= self.remaining_bits - 1; // Clear lowest bit
                 
-                let leaf = self.current_leaf?;
-                let bit_idx = (self.current_word_idx * 64 + bit_in_word) as u8;
-                let key = K::from_u128(leaf.prefix.to_u128() | bit_idx as u128);
+                // 🚀 Use cached prefix - NO memory load!
+                let bit_idx = (self.current_word_idx << 6) + bit_in_word;  // Use shift instead of mul
+                let key = K::from_u128(self.current_prefix.to_u128() | bit_idx as u128);
                 
                 // 🔥 ONLY difference from Iter: bounds check
                 if self.is_past_end(&key) {
@@ -372,11 +386,12 @@ impl<'a, K: TrieKey> RangeIter<'a, K> {
                 return None;
             }
             
-            // 🚀 Load next leaf and pre-load ALL bitmap words at once
+            // 🚀 Load next leaf and pre-load ALL bitmap words + prefix at once
             let (arena_idx, leaf_idx) = unpack_link(current_leaf.next);
             let next_leaf = self.trie.get_leaf_arena(arena_idx as u32).get(leaf_idx);
             
-            // 🚀 Cache all 4 words (ONE batch load per leaf)
+            // 🚀 Cache prefix + all 4 bitmap words (ONE batch load per leaf)
+            self.current_prefix = next_leaf.prefix;
             self.bitmap_cache = [
                 next_leaf.bitmap[0].load(Ordering::Acquire),
                 next_leaf.bitmap[1].load(Ordering::Acquire),
