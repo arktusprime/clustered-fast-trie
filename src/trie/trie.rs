@@ -18,7 +18,7 @@ use crate::trie::{ChildArenas, Leaf};
 ///
 /// # Architecture
 /// - 256-way branching trie (8 bits per level)
-/// - Flat arena storage: Vec<ChildArenas> for O(1) access
+/// - Flat arena storage: `Vec<ChildArenas>` for O(1) access
 /// - Physical indices: Node.child_arena_idx stores u32 index into Vec
 /// - Split levels: u64 at level 4, u128 at levels 4 and 12
 /// - Lazy allocation: arenas/nodes/leaves created on-demand
@@ -258,7 +258,7 @@ impl<K: TrieKey> Trie<K> {
 
         // Step 4: Get leaf arena and check bit
         let leaf_arena = self.get_leaf_arena(current_arena_idx);
-        
+
         // Step 5: Check bit in leaf bitmap
         // TODO: Update check_bit_in_leaf to use new architecture (for now inline it)
         use crate::bitmap::is_set;
@@ -698,9 +698,12 @@ impl<K: TrieKey> Trie<K> {
     }
 
     /// Helper: successor from leaf that returns leaf reference.
-    fn successor_from_leaf_with_ref(&self, key: K, leaf_idx: u32, arena_idx: u32) 
-        -> Option<(K, &Leaf<K>, u8)> 
-    {
+    fn successor_from_leaf_with_ref(
+        &self,
+        key: K,
+        leaf_idx: u32,
+        arena_idx: u32,
+    ) -> Option<(K, &Leaf<K>, u8)> {
         use crate::trie::{unpack_link, EMPTY_LINK};
 
         let leaf_arena = self.get_leaf_arena(arena_idx);
@@ -770,7 +773,7 @@ impl<K: TrieKey> Trie<K> {
     /// Get minimum key with leaf reference.
     fn min_with_leaf(&self) -> Option<(K, &Leaf<K>, u8)> {
         let min_key = self.find_min()?;
-        
+
         // Traverse to find min's leaf
         let mut current_arena_idx = 0;
         let mut current_node_idx = 0;
@@ -779,9 +782,9 @@ impl<K: TrieKey> Trie<K> {
             let byte = min_key.byte_at(level);
             let node_arena = self.get_node_arena(current_arena_idx);
             let node = node_arena.get(current_node_idx);
-            
+
             current_node_idx = node.get_child(byte);
-            
+
             if K::SPLIT_LEVELS.contains(&(level + 1)) {
                 current_arena_idx = node.child_arena_idx;
             }
@@ -791,11 +794,11 @@ impl<K: TrieKey> Trie<K> {
         let node_arena = self.get_node_arena(current_arena_idx);
         let final_node = node_arena.get(current_node_idx);
         let leaf_idx = final_node.get_child(last_byte);
-        
+
         let leaf_arena = self.get_leaf_arena(current_arena_idx);
         let leaf = leaf_arena.get(leaf_idx);
         let bit = min_key.last_byte();
-        
+
         Some((min_key, leaf, bit))
     }
 
@@ -1342,7 +1345,10 @@ impl<K: TrieKey> Trie<K> {
     /// # Performance
     /// O(1) - direct Vec indexing
     #[inline(always)]
-    fn get_node_arena_mut(&mut self, arena_idx: u32) -> &mut crate::arena::Arena<crate::trie::Node> {
+    fn get_node_arena_mut(
+        &mut self,
+        arena_idx: u32,
+    ) -> &mut crate::arena::Arena<crate::trie::Node> {
         &mut self.arenas[arena_idx as usize].node_arena
     }
 
@@ -1360,7 +1366,10 @@ impl<K: TrieKey> Trie<K> {
     /// # Performance
     /// O(1) - direct Vec indexing
     #[inline(always)]
-    pub(crate) fn get_leaf_arena(&self, arena_idx: u32) -> &crate::arena::Arena<crate::trie::Leaf<K>> {
+    pub(crate) fn get_leaf_arena(
+        &self,
+        arena_idx: u32,
+    ) -> &crate::arena::Arena<crate::trie::Leaf<K>> {
         &self.arenas[arena_idx as usize].leaf_arena
     }
 
@@ -1372,6 +1381,7 @@ impl<K: TrieKey> Trie<K> {
     /// # Performance
     /// O(1) - returns Vec length
     #[inline(always)]
+    #[allow(dead_code)]
     pub(crate) fn arenas_len(&self) -> usize {
         self.arenas.len()
     }
@@ -1402,7 +1412,10 @@ impl<K: TrieKey> Trie<K> {
     /// # Performance
     /// O(1) - direct Vec indexing
     #[inline(always)]
-    fn get_leaf_arena_mut(&mut self, arena_idx: u32) -> &mut crate::arena::Arena<crate::trie::Leaf<K>> {
+    fn get_leaf_arena_mut(
+        &mut self,
+        arena_idx: u32,
+    ) -> &mut crate::arena::Arena<crate::trie::Leaf<K>> {
         &mut self.arenas[arena_idx as usize].leaf_arena
     }
 
@@ -1494,11 +1507,17 @@ impl<K: TrieKey> Trie<K> {
                         let current_node = node_arena.get(current_node_idx);
                         current_node.child_arena_idx
                     };
-                    
+
                     // Child arena must exist (was created when child node was created)
-                    assert_ne!(child_arena_idx, 0, "Child arena should be set for existing child at split level");
-                    assert!((child_arena_idx as usize) < self.arenas.len(), "Child arena index out of bounds");
-                    
+                    assert_ne!(
+                        child_arena_idx, 0,
+                        "Child arena should be set for existing child at split level"
+                    );
+                    assert!(
+                        (child_arena_idx as usize) < self.arenas.len(),
+                        "Child arena index out of bounds"
+                    );
+
                     current_arena_idx = child_arena_idx;
                 }
 
@@ -1506,19 +1525,19 @@ impl<K: TrieKey> Trie<K> {
                 current_node_idx = idx;
             } else {
                 // Child doesn't exist - create new node and link it
-                
+
                 // Determine which arena the new node should be in
                 let target_arena_idx = if K::SPLIT_LEVELS.contains(&(level + 1)) {
                     // Next level is a split level - create or get child arena
                     let child_arena_idx = self.create_child_arena();
-                    
+
                     // Store child_arena_idx in parent node
                     {
                         let node_arena = self.get_node_arena_mut(current_arena_idx);
                         let current_node = node_arena.get_mut(current_node_idx);
                         current_node.child_arena_idx = child_arena_idx;
                     }
-                    
+
                     child_arena_idx
                 } else {
                     // Stay in current arena
@@ -2328,12 +2347,12 @@ mod tests {
         // Check child arena (index 1) has nodes and leaves
         let child_node_arena = &trie.arenas[1].node_arena;
         let child_leaf_arena = &trie.arenas[1].leaf_arena;
-        
+
         assert!(
             child_node_arena.len() >= 1,
             "Child arena should have nodes for lower 4 bytes"
         );
-        
+
         assert!(
             child_leaf_arena.len() >= 2,
             "Child arena should have multiple leaves for different prefixes"
@@ -2447,11 +2466,25 @@ mod tests {
         );
 
         // Check that we have child arenas with content
-        let has_child_with_nodes = trie.arenas.iter().skip(1).any(|arena| arena.node_arena.len() > 0);
-        assert!(has_child_with_nodes, "At least one child arena should have nodes");
+        let has_child_with_nodes = trie
+            .arenas
+            .iter()
+            .skip(1)
+            .any(|arena| arena.node_arena.len() > 0);
+        assert!(
+            has_child_with_nodes,
+            "At least one child arena should have nodes"
+        );
 
-        let has_child_with_leaves = trie.arenas.iter().skip(1).any(|arena| arena.leaf_arena.len() > 0);
-        assert!(has_child_with_leaves, "At least one child arena should have leaves");
+        let has_child_with_leaves = trie
+            .arenas
+            .iter()
+            .skip(1)
+            .any(|arena| arena.leaf_arena.len() > 0);
+        assert!(
+            has_child_with_leaves,
+            "At least one child arena should have leaves"
+        );
     }
 
     #[test]

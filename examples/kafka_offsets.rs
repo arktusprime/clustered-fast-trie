@@ -31,8 +31,14 @@ fn main() {
 
     // Check if a specific offset was processed
     println!("\nOffset checks:");
-    println!("  Offset 1050 processed: {}", processed_offsets.contains(1050));
-    println!("  Offset 1100 processed: {}", processed_offsets.contains(1100));
+    println!(
+        "  Offset 1050 processed: {}",
+        processed_offsets.contains(1050)
+    );
+    println!(
+        "  Offset 1100 processed: {}",
+        processed_offsets.contains(1100)
+    );
 
     // Find gaps in processed offsets
     println!("\nDetecting gaps:");
@@ -42,7 +48,10 @@ fn main() {
     println!("\nFinding next unprocessed offset:");
     if let Some(next_processed) = processed_offsets.successor(1099) {
         if next_processed > 1100 {
-            println!("  Gap detected! Next processed after 1099 is {}", next_processed);
+            println!(
+                "  Gap detected! Next processed after 1099 is {}",
+                next_processed
+            );
             println!("  Missing offset: 1100");
         }
     }
@@ -56,9 +65,12 @@ fn main() {
     // Simulate catching up on the gap
     println!("\nProcessing missing offset 1100...");
     processed_offsets.insert(1100);
-    
-    println!("  Offset 1100 now processed: {}", processed_offsets.contains(1100));
-    
+
+    println!(
+        "  Offset 1100 now processed: {}",
+        processed_offsets.contains(1100)
+    );
+
     // Verify no gaps remain
     println!("\nVerifying no gaps in range 1000-1150:");
     detect_gaps(&processed_offsets, 1000, 1150);
@@ -72,15 +84,17 @@ fn main() {
     // Simulate cleanup: remove old processed offsets to free memory
     println!("\nCleanup old offsets:");
     let cleanup_before = 1050;
-    let offsets_to_remove: Vec<u64> = processed_offsets
-        .range(..cleanup_before)
-        .collect();
-    
-    println!("  Removing {} old offsets (< {})...", offsets_to_remove.len(), cleanup_before);
+    let offsets_to_remove: Vec<u64> = processed_offsets.range(..cleanup_before).collect();
+
+    println!(
+        "  Removing {} old offsets (< {})...",
+        offsets_to_remove.len(),
+        cleanup_before
+    );
     for offset in offsets_to_remove {
         processed_offsets.remove(offset);
     }
-    
+
     println!("  Remaining offsets: {}", processed_offsets.len());
     println!("  New earliest offset: {:?}", processed_offsets.min());
 
@@ -96,13 +110,13 @@ fn detect_gaps(trie: &Trie<u64>, start: u64, end: u64) {
         if !trie.contains(current) {
             // Find the start of the gap
             let gap_start = current;
-            
+
             // Find where the gap ends
             let gap_end = match trie.successor(current) {
                 Some(next) if next <= end => next - 1,
                 _ => end,
             };
-            
+
             gaps.push((gap_start, gap_end));
             current = gap_end + 1;
         } else {

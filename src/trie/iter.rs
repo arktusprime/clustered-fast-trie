@@ -1,7 +1,7 @@
 //! Iterator support for Trie traversal.
 //!
 //! Provides BLAZING FAST iteration over keys using the linked list of leaves.
-//! 
+//!
 //! # Optimizations
 //! - Direct leaf references (no indirection)
 //! - Prefix caching (zero memory load in hot path)
@@ -88,7 +88,7 @@ impl<'a, K: TrieKey> Iter<'a, K> {
     /// O(1) - uses cached first_leaf, loads bitmap once
     pub(crate) fn new(trie: &'a Trie<K>) -> Self {
         let first_link = trie.first_leaf_link();
-        
+
         if first_link == EMPTY_LINK {
             return Self {
                 trie,
@@ -99,11 +99,11 @@ impl<'a, K: TrieKey> Iter<'a, K> {
                 remaining_bits: 0,
             };
         }
-        
+
         // 🚀 Get direct reference to first leaf (ONE TIME)
         let (arena_idx, leaf_idx) = unpack_link(first_link);
         let leaf = trie.get_leaf_arena(arena_idx as u32).get(leaf_idx);
-        
+
         // 🚀 Load ALL 4 bitmap words at once (ONE TIME per leaf)
         let bitmap_cache = [
             leaf.bitmap[0].load(Ordering::Acquire),
@@ -111,7 +111,7 @@ impl<'a, K: TrieKey> Iter<'a, K> {
             leaf.bitmap[2].load(Ordering::Acquire),
             leaf.bitmap[3].load(Ordering::Acquire),
         ];
-        
+
         Self {
             trie,
             current_leaf: Some(leaf),
@@ -129,10 +129,10 @@ impl<'a, K: TrieKey> Iter<'a, K> {
     /// # Returns
     /// Next key if found, None if end of iteration
     ///
-/// # Performance
-/// - Hot path: ~3-5 instructions (bit extraction, zero memory access)
-/// - Warm path: ~2-3 instructions (next word from cache)
-/// - Cold path: ~20-30 instructions (load next leaf, rare)
+    /// # Performance
+    /// - Hot path: ~3-5 instructions (bit extraction, zero memory access)
+    /// - Warm path: ~2-3 instructions (next word from cache)
+    /// - Cold path: ~20-30 instructions (load next leaf, rare)
     #[inline(always)]
     fn advance(&mut self) -> Option<K> {
         loop {
@@ -140,33 +140,33 @@ impl<'a, K: TrieKey> Iter<'a, K> {
             if self.remaining_bits != 0 {
                 let bit_in_word = trailing_zeros(self.remaining_bits) as usize;
                 self.remaining_bits &= self.remaining_bits - 1; // Clear lowest bit
-                
+
                 // 🚀 Use cached prefix - NO memory load!
-                let bit_idx = (self.current_word_idx << 6) + bit_in_word;  // Use shift instead of mul
+                let bit_idx = (self.current_word_idx << 6) + bit_in_word; // Use shift instead of mul
                 let key = K::from_u128(self.current_prefix.to_u128() | bit_idx as u128);
-                
+
                 return Some(key);
             }
-            
+
             // 🔥 WARM PATH: Next word from pre-loaded cache (NO memory access!)
             self.current_word_idx += 1;
             if self.current_word_idx < 4 {
                 self.remaining_bits = self.bitmap_cache[self.current_word_idx];
                 continue;
             }
-            
+
             // 🧊 COLD PATH: Load next leaf (rare - only once per 256 keys)
             let current_leaf = self.current_leaf?;
-            
+
             if current_leaf.next == EMPTY_LINK {
                 self.current_leaf = None;
                 return None;
             }
-            
+
             // 🚀 Load next leaf and pre-load ALL bitmap words + prefix at once
             let (arena_idx, leaf_idx) = unpack_link(current_leaf.next);
             let next_leaf = self.trie.get_leaf_arena(arena_idx as u32).get(leaf_idx);
-            
+
             // 🚀 Cache prefix + all 4 bitmap words (ONE batch load per leaf)
             self.current_prefix = next_leaf.prefix;
             self.bitmap_cache = [
@@ -175,7 +175,7 @@ impl<'a, K: TrieKey> Iter<'a, K> {
                 next_leaf.bitmap[2].load(Ordering::Acquire),
                 next_leaf.bitmap[3].load(Ordering::Acquire),
             ];
-            
+
             self.current_leaf = Some(next_leaf);
             self.current_word_idx = 0;
             self.remaining_bits = self.bitmap_cache[0];
@@ -287,14 +287,11 @@ impl<'a, K: TrieKey> RangeIter<'a, K> {
                 if first_link != EMPTY_LINK {
                     let (arena_idx, leaf_idx) = unpack_link(first_link);
                     let leaf = trie.get_leaf_arena(arena_idx as u32).get(leaf_idx);
-                    
+
                     // Find first bit in leaf
                     use crate::bitmap::min_bit;
-                    if let Some(bit) = min_bit(&leaf.bitmap) {
-                        Some((K::from_u128(leaf.prefix.to_u128() | bit as u128), leaf, bit))
-                    } else {
-                        None
-                    }
+                    min_bit(&leaf.bitmap)
+                        .map(|bit| (K::from_u128(leaf.prefix.to_u128() | bit as u128), leaf, bit))
                 } else {
                     None
                 }
@@ -357,39 +354,39 @@ impl<'a, K: TrieKey> RangeIter<'a, K> {
             if self.remaining_bits != 0 {
                 let bit_in_word = trailing_zeros(self.remaining_bits) as usize;
                 self.remaining_bits &= self.remaining_bits - 1; // Clear lowest bit
-                
+
                 // 🚀 Use cached prefix - NO memory load!
-                let bit_idx = (self.current_word_idx << 6) + bit_in_word;  // Use shift instead of mul
+                let bit_idx = (self.current_word_idx << 6) + bit_in_word; // Use shift instead of mul
                 let key = K::from_u128(self.current_prefix.to_u128() | bit_idx as u128);
-                
+
                 // 🔥 ONLY difference from Iter: bounds check
                 if self.is_past_end(&key) {
                     self.current_leaf = None;
                     return None;
                 }
-                
+
                 return Some(key);
             }
-            
+
             // 🔥 WARM PATH: Next word from pre-loaded cache (NO memory access!)
             self.current_word_idx += 1;
             if self.current_word_idx < 4 {
                 self.remaining_bits = self.bitmap_cache[self.current_word_idx];
                 continue;
             }
-            
+
             // 🧊 COLD PATH: Load next leaf (rare - only once per 256 keys)
             let current_leaf = self.current_leaf?;
-            
+
             if current_leaf.next == EMPTY_LINK {
                 self.current_leaf = None;
                 return None;
             }
-            
+
             // 🚀 Load next leaf and pre-load ALL bitmap words + prefix at once
             let (arena_idx, leaf_idx) = unpack_link(current_leaf.next);
             let next_leaf = self.trie.get_leaf_arena(arena_idx as u32).get(leaf_idx);
-            
+
             // 🚀 Cache prefix + all 4 bitmap words (ONE batch load per leaf)
             self.current_prefix = next_leaf.prefix;
             self.bitmap_cache = [
@@ -398,7 +395,7 @@ impl<'a, K: TrieKey> RangeIter<'a, K> {
                 next_leaf.bitmap[2].load(Ordering::Acquire),
                 next_leaf.bitmap[3].load(Ordering::Acquire),
             ];
-            
+
             self.current_leaf = Some(next_leaf);
             self.current_word_idx = 0;
             self.remaining_bits = self.bitmap_cache[0];
@@ -469,7 +466,7 @@ impl<K: TrieKey> Trie<K> {
     /// - `trie.range(..)` - full range (same as iter())
     ///
     /// # Arguments
-    /// * `range` - Range bounds (implements RangeBounds<K>)
+    /// * `range` - Range bounds (implements `RangeBounds<K>`)
     ///
     /// # Returns
     /// Iterator over keys in the specified range
@@ -521,47 +518,66 @@ mod tests {
     #[test]
     fn test_simple_two_leaves() {
         let mut trie = Trie::<u32>::new();
-        
+
         // Insert first key
         trie.insert(0);
         assert!(trie.contains(0));
-        assert_eq!(trie.get_leaf_arena(0).len(), 1, "Should have 1 leaf after first insert");
-        
+        assert_eq!(
+            trie.get_leaf_arena(0).len(),
+            1,
+            "Should have 1 leaf after first insert"
+        );
+
         // Verify first_leaf is set
         use crate::trie::{unpack_link, EMPTY_LINK};
-        assert_ne!(trie.first_leaf_link(), EMPTY_LINK, "first_leaf should be set after first insert");
-        
+        assert_ne!(
+            trie.first_leaf_link(),
+            EMPTY_LINK,
+            "first_leaf should be set after first insert"
+        );
+
         // Insert second key that should go to different leaf
         // Key 0 = 0x00000000 -> differs at level 2: byte=0x00
         // Key 256 = 0x00000100 -> differs at level 2: byte=0x01
         trie.insert(256);
-        
+
         // Check both keys exist
         assert!(trie.contains(0));
         assert!(trie.contains(256));
-        
+
         // Check total leaves in arena
         let total_leaves = trie.get_leaf_arena(0).len();
-        assert_eq!(total_leaves, 2, "Should have exactly 2 leaves, found {}", total_leaves);
-        
+        assert_eq!(
+            total_leaves, 2,
+            "Should have exactly 2 leaves, found {}",
+            total_leaves
+        );
+
         // Check linked list
         let mut current_link = trie.first_leaf_link();
         let mut linked_leaf_count = 0;
         let mut prefixes = alloc::vec::Vec::new();
-        
+
         while current_link != EMPTY_LINK && linked_leaf_count < 10 {
             let (arena_idx, leaf_idx) = unpack_link(current_link);
             let leaf_arena = trie.get_leaf_arena(arena_idx as u32);
             let leaf = leaf_arena.get(leaf_idx);
             prefixes.push(leaf.prefix);
-            
+
             current_link = leaf.next;
             linked_leaf_count += 1;
         }
-        
-        assert_eq!(linked_leaf_count, 2, "Should have 2 linked leaves, found {}", linked_leaf_count);
+
+        assert_eq!(
+            linked_leaf_count, 2,
+            "Should have 2 linked leaves, found {}",
+            linked_leaf_count
+        );
         assert_eq!(prefixes[0], 0, "First leaf should have prefix 0");
-        assert_eq!(prefixes[1], 0x100, "Second leaf should have prefix 0x100 (256)");
+        assert_eq!(
+            prefixes[1], 0x100,
+            "Second leaf should have prefix 0x100 (256)"
+        );
     }
 
     #[test]
@@ -572,38 +588,49 @@ mod tests {
         for i in 0..512 {
             trie.insert(i);
         }
-        
+
         // Verify all keys are actually inserted
         assert_eq!(trie.len(), 512, "Expected 512 keys in trie");
         assert!(trie.contains(0), "Key 0 should exist");
         assert!(trie.contains(255), "Key 255 should exist");
         assert!(trie.contains(256), "Key 256 should exist");
         assert!(trie.contains(511), "Key 511 should exist");
-        
+
         // Check first_leaf is set
-        assert_ne!(trie.first_leaf_link(), crate::trie::EMPTY_LINK, "first_leaf should be set");
-        
+        assert_ne!(
+            trie.first_leaf_link(),
+            crate::trie::EMPTY_LINK,
+            "first_leaf should be set"
+        );
+
         // Check total leaves in arena
         let total_leaves = trie.get_leaf_arena(0).len();
-        assert!(total_leaves >= 2, "Should have at least 2 leaves in arena, found {}", total_leaves);
-        
+        assert!(
+            total_leaves >= 2,
+            "Should have at least 2 leaves in arena, found {}",
+            total_leaves
+        );
+
         // Try to manually iterate through leaves via linked list
         use crate::trie::{unpack_link, EMPTY_LINK};
         let mut current_link = trie.first_leaf_link();
         let mut linked_leaf_count = 0;
-        
-        while current_link != EMPTY_LINK && linked_leaf_count < 10 {  // Safety limit
+
+        while current_link != EMPTY_LINK && linked_leaf_count < 10 {
+            // Safety limit
             let (arena_idx, leaf_idx) = unpack_link(current_link);
             let leaf_arena = trie.get_leaf_arena(arena_idx as u32);
             let leaf = leaf_arena.get(leaf_idx);
-            
+
             current_link = leaf.next;
             linked_leaf_count += 1;
         }
-        
-        assert_eq!(linked_leaf_count, total_leaves, 
-            "Linked list should contain all {} leaves, but only found {} linked", 
-            total_leaves, linked_leaf_count);
+
+        assert_eq!(
+            linked_leaf_count, total_leaves,
+            "Linked list should contain all {} leaves, but only found {} linked",
+            total_leaves, linked_leaf_count
+        );
     }
 
     #[test]
@@ -660,9 +687,13 @@ mod tests {
 
         let keys: Vec<u32> = trie.iter().collect();
         assert_eq!(keys.len(), 300, "Expected 300 keys, got {}", keys.len());
-        
+
         for (i, &key) in keys.iter().enumerate() {
-            assert_eq!(key, i as u32, "Key mismatch at index {}: expected {}, got {}", i, i, key);
+            assert_eq!(
+                key, i as u32,
+                "Key mismatch at index {}: expected {}, got {}",
+                i, i, key
+            );
         }
     }
 
@@ -795,14 +826,14 @@ mod tests {
     fn test_u128_iter_large() {
         let mut trie = Trie::<u128>::new();
         let large = 1u128 << 100;
-        
+
         trie.insert(large);
         trie.insert(large + 1);
         trie.insert(large + 2);
-        
+
         assert_eq!(trie.len(), 3);
         assert!(trie.contains(large));
-        
+
         let keys: Vec<u128> = trie.iter().collect();
         assert_eq!(keys.len(), 3);
         assert_eq!(keys[0], large, "Expected {}, got {}", large, keys[0]);
@@ -846,18 +877,28 @@ mod tests {
         assert!(!trie.contains(large_base + 100)); // 100 is OUT of range
 
         let keys: Vec<u128> = trie.range((large_base + 10)..(large_base + 20)).collect();
-        
+
         // Debug: check what we actually got
         if keys.len() != 10 {
             // Check first few and last few keys
             let sample_size = 5.min(keys.len());
             let first_few: Vec<u128> = keys.iter().take(sample_size).copied().collect();
-            let expected_first: Vec<u128> = (0..sample_size).map(|i| large_base + 10 + i as u128).collect();
-            
-            assert_eq!(first_few, expected_first, "First keys don't match expected range");
+            let expected_first: Vec<u128> = (0..sample_size)
+                .map(|i| large_base + 10 + i as u128)
+                .collect();
+
+            assert_eq!(
+                first_few, expected_first,
+                "First keys don't match expected range"
+            );
         }
-        
-        assert_eq!(keys.len(), 10, "Expected 10 keys in range, got {}", keys.len());
+
+        assert_eq!(
+            keys.len(),
+            10,
+            "Expected 10 keys in range, got {}",
+            keys.len()
+        );
         assert_eq!(keys[0], large_base + 10);
         assert_eq!(keys[9], large_base + 19);
     }

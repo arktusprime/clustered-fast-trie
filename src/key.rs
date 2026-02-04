@@ -42,9 +42,9 @@ pub trait TrieKey: Copy + Eq + PartialOrd + Sized {
     /// Defines at which levels to create separate arenas for better cache locality.
     /// Nodes at these levels store child_arena_idx for their subtrees.
     ///
-    /// - u32: &[] (no splits, single arena)
-    /// - u64: &[4] (split at level 4: levels 0-3 in root, 4-7 in child arenas)
-    /// - u128: &[4, 12] (splits at levels 4 and 12: three-level hierarchy)
+    /// - u32: &\[] (no splits, single arena)
+    /// - u64: &\[4\] (split at level 4: levels 0-3 in root, 4-7 in child arenas)
+    /// - u128: &\[4, 12\] (splits at levels 4 and 12: three-level hierarchy)
     ///
     /// # Rationale
     /// - Root arena (levels 0-3): always hot in cache, ~256-65K nodes

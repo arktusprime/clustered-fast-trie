@@ -48,7 +48,7 @@ fn main() {
     println!("\nRange queries:");
     let range: Vec<u64> = trie.range(100..200).collect();
     println!("  range(100..200): {:?}", range);
-    
+
     let range: Vec<u64> = trie.range(100..=200).collect();
     println!("  range(100..=200): {:?}", range);
 
@@ -61,30 +61,30 @@ fn main() {
     // Demonstrate with clustered data
     println!("\n=== Clustered Data Example ===\n");
     let mut clustered = Trie::<u64>::new();
-    
+
     // Insert clustered ranges (simulating real-world use cases)
     println!("Inserting clustered ranges:");
     println!("  Range 1000-1099 (100 keys)");
     for i in 1000..1100 {
         clustered.insert(i);
     }
-    
+
     println!("  Range 2000-2099 (100 keys)");
     for i in 2000..2100 {
         clustered.insert(i);
     }
-    
+
     println!("\nClustered trie stats:");
     println!("  Total keys: {}", clustered.len());
     println!("  Min: {:?}", clustered.min());
     println!("  Max: {:?}", clustered.max());
-    
+
     // Efficient iteration over clustered data
     println!("\nFirst 5 keys:");
     for (i, key) in clustered.iter().take(5).enumerate() {
         println!("  {}: {}", i + 1, key);
     }
-    
+
     println!("\nLast 5 keys:");
     let all_keys: Vec<u64> = clustered.iter().collect();
     for (i, &key) in all_keys.iter().rev().take(5).rev().enumerate() {
@@ -96,7 +96,7 @@ fn main() {
     let gap_range: Vec<u64> = clustered.range(1095..2005).collect();
     println!("  range(1095..2005) has {} keys", gap_range.len());
     println!("  First 3: {:?}", &gap_range[0..3]);
-    println!("  Last 3: {:?}", &gap_range[gap_range.len()-3..]);
+    println!("  Last 3: {:?}", &gap_range[gap_range.len() - 3..]);
 
     println!("\n=== Example Complete ===");
 }
