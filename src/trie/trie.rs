@@ -1,7 +1,7 @@
 //! Main Trie structure for ordered integer sets.
 
 use crate::key::TrieKey;
-use crate::trie::ChildArenas;
+use crate::trie::{ChildArenas, Leaf};
 
 /// Ordered integer set with sublogarithmic complexity.
 ///
@@ -607,6 +607,196 @@ impl<K: TrieKey> Trie<K> {
 
         // Leaf exists → search in leaf and next
         self.successor_from_leaf_internal(key, leaf_idx, current_arena_idx)
+    }
+
+    /// Find successor with leaf reference (for range iterators).
+    ///
+    /// Returns successor key along with direct leaf reference and bit position.
+    /// This avoids double traversal in range queries.
+    ///
+    /// # Arguments
+    /// * `key` - The key to find successor for
+    ///
+    /// # Returns
+    /// Tuple of (successor_key, &Leaf, bit_index), or None if no successor exists
+    ///
+    /// # Performance
+    /// O(log log U) - same as successor(), but avoids re-traversal
+    ///
+    /// # Use Case
+    /// Used by RangeIter::new() to position iterator without double traversal
+    pub(crate) fn successor_with_leaf(&self, key: K) -> Option<(K, &Leaf<K>, u8)> {
+        // Quick checks using cached min/max
+        if let Some(max) = self.max_key {
+            if key >= max {
+                return None;
+            }
+        }
+        if let Some(min) = self.min_key {
+            if key < min {
+                // Need to find min's leaf
+                return self.min_with_leaf();
+            }
+        }
+
+        // Start at root arena
+        let mut current_arena_idx = 0;
+
+        let node_arena = self.get_node_arena(current_arena_idx);
+        if node_arena.is_empty() {
+            return None;
+        }
+
+        // Traverse to leaf containing key's prefix (save path for backtracking)
+        let mut path: [(u32, u8, u32); 16] = [(0, 0, 0); 16];
+        let mut path_len = 0;
+        let mut current_node_idx = 0;
+
+        // Traverse internal levels
+        for level in 0..(K::LEVELS - 1) {
+            let byte = key.byte_at(level);
+            path[path_len] = (current_node_idx, byte, current_arena_idx);
+            path_len += 1;
+
+            let node_arena = self.get_node_arena(current_arena_idx);
+            let current_node = node_arena.get(current_node_idx);
+
+            if !current_node.has_child(byte) {
+                // Path doesn't exist → backtrack to find next leaf
+                return self.successor_backtrack_with_leaf(key, &path, path_len, current_arena_idx);
+            }
+
+            current_node_idx = current_node.get_child(byte);
+
+            // Check if we need to switch arenas at split level
+            if K::SPLIT_LEVELS.contains(&(level + 1)) {
+                let child_arena_idx = current_node.child_arena_idx;
+                if child_arena_idx as usize >= self.arenas.len() {
+                    return None;
+                }
+                current_arena_idx = child_arena_idx;
+            }
+        }
+
+        // Final level: check if leaf exists
+        let last_node_byte = key.byte_at(K::LEVELS - 1);
+        path[path_len] = (current_node_idx, last_node_byte, current_arena_idx);
+        path_len += 1;
+
+        let node_arena = self.get_node_arena(current_arena_idx);
+        let final_node = node_arena.get(current_node_idx);
+
+        if !final_node.has_child(last_node_byte) {
+            // Leaf doesn't exist → backtrack to find next leaf
+            return self.successor_backtrack_with_leaf(key, &path, path_len, current_arena_idx);
+        }
+
+        let leaf_idx = final_node.get_child(last_node_byte);
+
+        // Leaf exists → search in leaf and next, return with leaf reference
+        self.successor_from_leaf_with_ref(key, leaf_idx, current_arena_idx)
+    }
+
+    /// Helper: successor from leaf that returns leaf reference.
+    fn successor_from_leaf_with_ref(&self, key: K, leaf_idx: u32, arena_idx: u32) 
+        -> Option<(K, &Leaf<K>, u8)> 
+    {
+        use crate::trie::{unpack_link, EMPTY_LINK};
+
+        let leaf_arena = self.get_leaf_arena(arena_idx);
+        let leaf = leaf_arena.get(leaf_idx);
+
+        // Try to find successor in current leaf
+        let last_byte = key.last_byte();
+        if let Some(next_bit) = crate::bitmap::next_set_bit(&leaf.bitmap, last_byte) {
+            // Found in same leaf
+            let mut key_value = key.prefix().to_u128();
+            key_value |= next_bit as u128;
+            return Some((K::from_u128(key_value), leaf, next_bit));
+        }
+
+        // Not in current leaf - try next leaf via linked list
+        if leaf.next != EMPTY_LINK {
+            let (next_arena_idx, next_leaf_idx) = unpack_link(leaf.next);
+            if (next_arena_idx as usize) < self.arenas.len() {
+                let next_leaf_arena = self.get_leaf_arena(next_arena_idx as u32);
+                let next_leaf = next_leaf_arena.get(next_leaf_idx);
+                if let Some(min_bit) = crate::bitmap::min_bit(&next_leaf.bitmap) {
+                    // Found in next leaf
+                    let mut key_value = next_leaf.prefix.to_u128() << 8;
+                    key_value |= min_bit as u128;
+                    return Some((K::from_u128(key_value), next_leaf, min_bit));
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Helper: backtrack with leaf reference.
+    fn successor_backtrack_with_leaf(
+        &self,
+        _key: K,
+        path: &[(u32, u8, u32)],
+        path_len: usize,
+        _arena_idx: u32,
+    ) -> Option<(K, &Leaf<K>, u8)> {
+        use crate::trie::{unpack_link, EMPTY_LINK};
+
+        // Find next leaf using backtracking
+        let next_link = self.find_next_leaf(path, path_len);
+
+        if next_link == EMPTY_LINK {
+            return None;
+        }
+
+        // Get minimum key from next leaf with reference
+        let (next_arena_idx, next_leaf_idx) = unpack_link(next_link);
+        if (next_arena_idx as usize) >= self.arenas.len() {
+            return None;
+        }
+        let leaf_arena = self.get_leaf_arena(next_arena_idx as u32);
+        let next_leaf = leaf_arena.get(next_leaf_idx);
+
+        if let Some(min_bit) = crate::bitmap::min_bit(&next_leaf.bitmap) {
+            let mut key_value = next_leaf.prefix.to_u128() << 8;
+            key_value |= min_bit as u128;
+            return Some((K::from_u128(key_value), next_leaf, min_bit));
+        }
+
+        None
+    }
+
+    /// Get minimum key with leaf reference.
+    fn min_with_leaf(&self) -> Option<(K, &Leaf<K>, u8)> {
+        let min_key = self.find_min()?;
+        
+        // Traverse to find min's leaf
+        let mut current_arena_idx = 0;
+        let mut current_node_idx = 0;
+
+        for level in 0..(K::LEVELS - 1) {
+            let byte = min_key.byte_at(level);
+            let node_arena = self.get_node_arena(current_arena_idx);
+            let node = node_arena.get(current_node_idx);
+            
+            current_node_idx = node.get_child(byte);
+            
+            if K::SPLIT_LEVELS.contains(&(level + 1)) {
+                current_arena_idx = node.child_arena_idx;
+            }
+        }
+
+        let last_byte = min_key.byte_at(K::LEVELS - 1);
+        let node_arena = self.get_node_arena(current_arena_idx);
+        let final_node = node_arena.get(current_node_idx);
+        let leaf_idx = final_node.get_child(last_byte);
+        
+        let leaf_arena = self.get_leaf_arena(current_arena_idx);
+        let leaf = leaf_arena.get(leaf_idx);
+        let bit = min_key.last_byte();
+        
+        Some((min_key, leaf, bit))
     }
 
     /// Find successor starting from a specific leaf (for bulk operations).
