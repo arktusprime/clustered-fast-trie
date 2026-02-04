@@ -1,4 +1,6 @@
 /target
 Cargo.lock
 
+# Working documents (not for distribution)
 /rd
+/rd2
