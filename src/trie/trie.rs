@@ -605,8 +605,8 @@ impl<K: TrieKey> Trie<K> {
 
         let leaf_idx = final_node.get_child(last_node_byte);
 
-        // Leaf exists → search in leaf and next
-        self.successor_from_leaf_internal(key, leaf_idx, current_arena_idx)
+        // Leaf exists → search in leaf and next (internal fast path)
+        self.successor_from_leaf(key, current_arena_idx, leaf_idx)
     }
 
     /// Find successor with leaf reference (for range iterators).
@@ -826,9 +826,8 @@ impl<K: TrieKey> Trie<K> {
     /// # Use Case
     /// Iterators and range operations cache the last accessed leaf index
     /// and use this method for subsequent calls, achieving O(1) per element.
-    pub fn successor_from_leaf(&self, key: K, leaf_idx: u32) -> Option<K> {
-        // NEW ARCHITECTURE: Use root arena
-        let arena_idx = 0;
+    /// Internal use only: fast successor from a known leaf (caller must pass correct arena).
+    pub(crate) fn successor_from_leaf(&self, key: K, arena_idx: u32, leaf_idx: u32) -> Option<K> {
         self.successor_from_leaf_internal(key, leaf_idx, arena_idx)
     }
 
@@ -1015,8 +1014,8 @@ impl<K: TrieKey> Trie<K> {
 
         let leaf_idx = final_node.get_child(last_node_byte);
 
-        // Leaf exists → search in leaf and prev
-        self.predecessor_from_leaf_internal(key, leaf_idx, current_arena_idx)
+        // Leaf exists → search in leaf and prev (internal fast path)
+        self.predecessor_from_leaf(key, current_arena_idx, leaf_idx)
     }
 
     /// Find predecessor starting from a specific leaf (for bulk operations).
@@ -1043,9 +1042,8 @@ impl<K: TrieKey> Trie<K> {
     /// # Use Case
     /// Reverse iterators and range operations cache the last accessed leaf index
     /// and use this method for subsequent calls, achieving O(1) per element.
-    pub fn predecessor_from_leaf(&self, key: K, leaf_idx: u32) -> Option<K> {
-        // NEW ARCHITECTURE: Use root arena
-        let arena_idx = 0;
+    /// Internal use only: fast predecessor from a known leaf (caller must pass correct arena).
+    pub(crate) fn predecessor_from_leaf(&self, key: K, arena_idx: u32, leaf_idx: u32) -> Option<K> {
         self.predecessor_from_leaf_internal(key, leaf_idx, arena_idx)
     }
 
