@@ -1,0 +1,11 @@
+# Force LF line endings in the repo (Linux-style), regardless of OS.
+# On Windows, Git will normalize to LF on commit and keep LF in working copy.
+* text=auto eol=lf
+
+# Explicitly mark binary files so Git does not touch line endings
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
