@@ -1,136 +1,137 @@
 # Benchmarks
 
-Сравнение производительности `clustered-fast-trie` с `BTreeSet` из стандартной библиотеки.
+Performance comparison of `clustered-fast-trie` with `BTreeSet` from the standard library.
 
-## Запуск бенчмарков
+## Running benchmarks
 
-### Все бенчмарки
+### All benchmarks
 ```bash
 cargo bench
 ```
 
-### Конкретный файл бенчмарков
+### Specific benchmark file
 ```bash
-# Сравнение операций с полными датасетами
+# Comparison with full datasets
 cargo bench --bench comparison
 
-# Одиночные операции с разными размерами
+# Single operations with varying sizes
 cargo bench --bench single_ops
 ```
 
-### Конкретный тест
+### Specific test
 ```bash
 cargo bench --bench comparison insert_sequential
 cargo bench --bench comparison contains
 cargo bench --bench single_ops single_insert
 ```
 
-## Структура бенчмарков
+## Benchmark structure
 
-### `comparison.rs` - Сравнение с BTreeSet
+### `comparison.rs` - Comparison with BTreeSet
 
-**Тестируемые сценарии:**
+**Test scenarios:**
 
-1. **insert_sequential** - вставка последовательных ключей (0, 1, 2, ...)
-   - Размеры: 1K, 10K, 100K элементов
-   - Показывает производительность на идеальных данных
+1. **insert_sequential** - sequential key insertion (0, 1, 2, ...)
+   - Sizes: 1K, 10K, 100K elements
+   - Shows performance on ideal data
 
-2. **insert_clustered** - вставка кластерных данных (несколько диапазонов)
-   - Паттерн: 0-1000, 10000-11000, 20000-21000, 30000-31000
-   - Реальный сценарий для Kafka offsets, временных меток
+2. **insert_clustered** - clustered data insertion (multiple ranges)
+   - Pattern: 0-1000, 10000-11000, 20000-21000, 30000-31000
+   - Realistic scenario for Kafka offsets, timestamps
 
-3. **insert_random** - вставка псевдослучайных ключей
-   - 10K элементов
-   - Худший случай для Trie
+3. **insert_random** - pseudorandom key insertion
+   - 10K elements
+   - Worst case for Trie
 
-4. **contains** - проверка наличия ключей
-   - existing: поиск существующих ключей
-   - missing: поиск отсутствующих ключей
-   - 10K элементов в датасете
+4. **contains** - key lookup
+   - existing: search for present keys
+   - missing: search for absent keys
+   - 10K elements in dataset
 
-5. **contains_clustered** - поиск в кластерных данных
-   - Несколько кластеров по 1K элементов
-   - Показывает cache-friendly паттерны
+5. **contains_clustered** - lookup in clustered data
+   - Multiple clusters of 1K elements each
+   - Shows cache-friendly patterns
 
-6. **remove** - удаление ключей
-   - sequential: удаление подряд
-   - sparse: удаление через один
-   - 10K элементов
+6. **remove** - key removal
+   - sequential: removal in order
+   - sparse: removal of every other key
+   - 10K elements
 
-7. **mixed_workload** - смешанная нагрузка
+7. **mixed_workload** - mixed workload
    - insert → contains → remove → insert
-   - Реалистичный сценарий использования
+   - Realistic usage scenario
 
-### `single_ops.rs` - Одиночные операции
+### `single_ops.rs` - Single operations
 
-**Тестируемые сценарии:**
+**Test scenarios:**
 
-1. **single_insert** - одна вставка в датасет разного размера
-   - Размеры: 100, 1K, 10K, 100K
-   - Показывает как растет latency с размером
+1. **single_insert** - one insert into dataset of varying size
+   - Sizes: 100, 1K, 10K, 100K
+   - Shows how latency grows with size
 
-2. **single_contains** - один поиск в датасете разного размера
-   - hit: ключ найден (в середине)
-   - miss: ключ не найден
-   - Размеры: 100, 1K, 10K, 100K
+2. **single_contains** - one lookup in dataset of varying size
+   - hit: key found (in the middle)
+   - miss: key not found
+   - Sizes: 100, 1K, 10K, 100K
 
-3. **single_remove** - одно удаление из датасета разного размера
-   - Удаление из середины датасета
-   - Размеры: 100, 1K, 10K, 100K
+3. **single_remove** - one removal from dataset of varying size
+   - Removal from the middle
+   - Sizes: 100, 1K, 10K, 100K
 
-4. **sequential_pattern** - последовательные вставки
-   - Прямой порядок (0→1000)
-   - Обратный порядок (1000→0)
-   - Показывает cache benefits
+4. **sequential_pattern** - sequential inserts
+   - Forward order (0→1000)
+   - Reverse order (1000→0)
+   - Shows cache benefits
 
-5. **worst_case_insert** - худший случай для вставки
-   - Alternating pattern: чередование далеких ключей
-   - Нет преимуществ от кеширования
+5. **worst_case_insert** - worst case for insertion
+   - Alternating pattern: far-apart keys
+   - No cache benefits
 
-## Ожидаемые результаты
+## Expected results
 
-### Где Trie должен быть быстрее:
+### Where Trie should be faster:
 - ✅ Sequential inserts (cache hot path)
 - ✅ Clustered data (cache locality)
 - ✅ Large datasets (O(log log U) vs O(log n))
 - ✅ Contains on clustered data
 
-### Где BTreeSet может быть быстрее:
+### Where BTreeSet may be faster:
 - ⚠️ Random inserts (no cache benefits)
 - ⚠️ Very small datasets (<100 elements)
 - ⚠️ Sparse random keys
 
 ### O(log log U) vs O(log n):
-- Trie: зависит от размера ключа (u64 = 8 уровней)
-- BTreeSet: зависит от количества элементов
-- Crossover point: ~256 элементов (log₂ 256 = 8)
+- Trie: depends on key size (u64 = 8 levels)
+- BTreeSet: depends on number of elements
+- Crossover point: ~256 elements (log₂ 256 = 8)
 
-## Интерпретация результатов
+## Interpreting results
 
-Criterion выводит:
-- **time**: среднее время операции
-- **thrpt**: throughput (операций/сек)
-- **change**: изменение относительно предыдущего запуска
+Criterion outputs:
+- **time**: mean operation time
+- **thrpt**: throughput (ops/sec)
+- **change**: change relative to previous run
 
-Смотрите на:
-1. Абсолютные значения (ns/op)
-2. Скейлинг с ростом размера
-3. Variance (стабильность latency)
+Look at:
+1. Absolute values (ns/op)
+2. Scaling with size
+3. Variance (latency stability)
 
-## Визуализация
+## Visualization
 
-После запуска бенчмарков Criterion создает HTML отчеты:
+After running benchmarks, Criterion creates HTML reports:
 
 ```bash
-# Открыть отчет в браузере
+# Enhance report (values in tables, violin plots) and open
+cargo run -p report-enhancer
 start target/criterion/report/index.html  # Windows
 open target/criterion/report/index.html   # macOS
 xdg-open target/criterion/report/index.html  # Linux
 ```
 
-## Примечания
+## Notes
 
-- Используйте `--release` для реалистичных результатов (cargo bench делает это автоматически)
-- Закройте другие приложения для стабильных измерений
-- Первый запуск создает baseline для сравнения
-- Последующие запуски сравниваются с baseline
+- Use `--release` for realistic results (cargo bench does this automatically)
+- Close other applications for stable measurements
+- First run creates baseline for comparison
+- Subsequent runs are compared against baseline

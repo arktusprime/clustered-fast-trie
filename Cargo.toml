@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "report-enhancer"]
+
 [package]
 name = "clustered-fast-trie"
 version = "0.1.0"

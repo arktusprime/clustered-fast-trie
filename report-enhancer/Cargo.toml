@@ -1,0 +1,10 @@
+[package]
+name = "report-enhancer"
+version = "0.1.0"
+edition = "2021"
+description = "Enhance Criterion benchmark report: values in tables, comparison tables, violin colors"
+
+[dependencies]
+walkdir = "2"
+serde_json = "1"
+regex = "1"
